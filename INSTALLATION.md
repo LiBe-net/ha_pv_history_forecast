@@ -59,17 +59,16 @@ Der Konfigurationsassistent führt Sie in zwei Schritten:
 
 ### Schritt 3: Automatische Sensor-Erstellung
 
-Nach der Konfiguration erstellt die Integration automatisch bis zu **7 Sensoren**:
+Nach der Konfiguration erstellt die Integration automatisch bis zu **6 Sensoren**:
 
 | Sensor | Beschreibung |
 |--------|--------------|
-| `sensor.{prefix}_remaining_today` | Verbleibender Ertrag heute (Hauptsensor mit SQL-Daten) |
+| `sensor.{prefix}_remaining_today` | Verbleibender Ertrag heute (Hauptsensor mit SQL-Daten + Attribut `lovelace_card`) |
 | `sensor.{prefix}_remaining_min` | Pessimistische Tagesrest-Prognose |
 | `sensor.{prefix}_remaining_max` | Optimistische Tagesrest-Prognose |
 | `sensor.{prefix}_tomorrow` | Gewichtete Prognose Gesamtertrag morgen |
 | `sensor.{prefix}_weather_forecast` | Interner Wetter-Vorhersage-Sensor (JSON) |
 | `sensor.{prefix}_cloud_coverage` | Auto-Bewölkungssensor *(nur wenn kein externer Cloud-Sensor gewählt)* |
-| `sensor.{prefix}_lovelace` | Vorberechnete Markdown-Card (Attribut `lovelace_card`) |
 
 Mit Standard-Präfix `pv_hist` heißt der Hauptsensor also `sensor.pv_hist_remaining_today`.
 
@@ -117,7 +116,7 @@ Der Sensor `sensor.{prefix}_lovelace` rendert automatisch eine vollständige Mar
 
 ```yaml
 type: markdown
-content: "{{ state_attr('sensor.pv_hist_lovelace', 'lovelace_card') }}"
+content: "{{ state_attr('sensor.pv_hist_remaining_today', 'lovelace_card') }}"
 ```
 
 Die Karte enthält Prognose, historische Vergleichstage und stündliche Bewölkungstabelle.

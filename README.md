@@ -4,7 +4,7 @@ Eine Home Assistant HACS-Erweiterung für eine SQL-basierte PV-Ertragsprognose. 
 
 ## Features
 
-- 🔋 **7 Sensoren automatisch**: Aus einer einzigen Konfiguration entstehen alle benötigten Sensoren
+- 🔋 **6 Sensoren automatisch**: Aus einer einzigen Konfiguration entstehen alle benötigten Sensoren
 - 💾 **SQLite Integration**: Direkte Analyse der Home Assistant Datenbank (`home-assistant_v2.db`)
 - 🌍 **Ortsgerechte Astronomie**: Tageslängenkorrekturen basierend auf dem konfigurierten Breitengrad (`hass.config.latitude`)
 - 🌥️ **Historischer Vergleich**: Gleicht aktuelle Bewölkung mit tageweise ähnlichen historischen Tagen ab
@@ -21,13 +21,12 @@ Nach der Konfiguration mit Präfix `pv_hist` (Standard) stehen folgende Sensoren
 
 | Sensor | Beschreibung |
 |--------|--------------|
-| `sensor.pv_hist_remaining_today` | Verbleibender PV-Ertrag heute (kWh), Hauptsensor |
+| `sensor.pv_hist_remaining_today` | Verbleibender PV-Ertrag heute (kWh), Hauptsensor — enthält auch `lovelace_card` im Attribut |
 | `sensor.pv_hist_remaining_min` | Pessimistische Tagesrest-Prognose (ähnliche Tage mit mehr Bewölkung) |
 | `sensor.pv_hist_remaining_max` | Optimistische Tagesrest-Prognose (ähnliche Tage mit weniger Bewölkung) |
 | `sensor.pv_hist_tomorrow` | Gewichtete Prognose für den Gesamtertrag morgen (kWh) |
 | `sensor.pv_hist_weather_forecast` | Interner Hilfssensor: stündliche Wettervorhersage (JSON) |
 | `sensor.pv_hist_cloud_coverage` | Auto-Bewölkungssensor (nur wenn kein externer Cloud-Sensor gewählt) |
-| `sensor.pv_hist_lovelace` | Vorberechnete Lovelace Markdown-Card (im Attribut `lovelace_card`) |
 
 Die Präfix-Bezeichnung (`pv_hist`) wird beim Setup frei gewählt — alle Sensornamen leiten sich davon ab.
 
@@ -85,10 +84,8 @@ Der Sensor `sensor.{prefix}_lovelace` rendert alle 15 Minuten eine vollständige
 
 ```yaml
 type: markdown
-content: "{{ state_attr('sensor.pv_hist_lovelace', 'lovelace_card') }}"
+content: "{{ state_attr('sensor.pv_hist_remaining_today', 'lovelace_card') }}"
 ```
-
-Der für die Karte genutzte Quellsensor (Standard: `sensor.{prefix}_remaining_today`) kann im Konfigurations-Assistenten angepasst werden.
 
 ## Sensor-Anforderungen
 
@@ -131,7 +128,7 @@ dl = 24/π · arccos(−tan(φ) · tan(δ))   mit  δ = −0.4093 · cos(2π·(d
 
 | Version | Änderungen |
 |---------|-----------|
-| **0.1.0** | Initiale Veröffentlichung unter neuem Namen `pv_history_forecast`. Enthält alle Features: 7 Sensoren, adaptiver EMA-Filter, 5-Minuten-Intervall, intelligente Sensor-Dropdowns, Wh→kWh-Normierung, UTC-korrektes Tagesgruppieren (DST-sicher), Lovelace Card, Auto-Cloud-Sensor. |
+| **0.1.0** | Initiale Veröffentlichung unter neuem Namen `pv_history_forecast`. Enthält alle Features: 6 Sensoren, adaptiver EMA-Filter, 5-Minuten-Intervall, intelligente Sensor-Dropdowns, Wh→kWh-Normierung, UTC-korrektes Tagesgruppieren (DST-sicher), Lovelace Card als Attribut des Hauptsensors, Auto-Cloud-Sensor. |
 
 ## Lizenz
 

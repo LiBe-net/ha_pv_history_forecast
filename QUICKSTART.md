@@ -49,19 +49,18 @@ PV History Tage:            30  (Standard)
 
 Sie sollten jetzt bis zu **7 neue Sensoren** haben:
 ```
-sensor.pv_hist_remaining_today   ← verbleibender Ertrag heute
+sensor.pv_hist_remaining_today   ← verbleibender Ertrag heute + Attribut lovelace_card
 sensor.pv_hist_remaining_min     ← pessimistische Prognose
 sensor.pv_hist_remaining_max     ← optimistische Prognose
 sensor.pv_hist_tomorrow          ← Gesamtprognose morgen
 sensor.pv_hist_weather_forecast  ← interner Wetter-Sensor
 sensor.pv_hist_cloud_coverage    ← Auto-Bewölkungssensor (wenn kein externer gewählt)
-sensor.pv_hist_lovelace          ← vorberechnete Lovelace Markdown-Card
 ```
 
 **Lovelace Card einbinden:**
 ```yaml
 type: markdown
-content: "{{ state_attr('sensor.pv_hist_lovelace', 'lovelace_card') }}"
+content: "{{ state_attr('sensor.pv_hist_remaining_today', 'lovelace_card') }}"
 ```
 
 ## Minimal Setup ohne existierende Sensoren

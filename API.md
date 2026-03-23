@@ -74,23 +74,22 @@ Der Sensor sammelt Bewölkungsdaten von der konfigurierten Wetter-Entity und reg
 
 > **SQL-Fallback**: Für Tage, an denen der Auto-Sensor noch keine LTS-Statistik hat, greift der SQL-`cloud_history`-CTE automatisch direkt auf die States der Wetter-Entity zurück.
 
-### `sensor.pv_hist_lovelace` — Lovelace Markdown-Card
+### Lovelace Markdown-Card (Attribut von `sensor.pv_hist_remaining_today`)
 
-| Eigenschaft | Wert |
-|-------------|------|
-| `state` | ISO-Zeitstempel des letzten Renders |
+Das Attribut `lovelace_card` des Hauptsensors enthält die fertig gerenderte Markdown-Karte:
+
+| Attribut | Wert |
+|----------|------|
 | `attributes.lovelace_card` | Fertig gerenderter Markdown-Inhalt |
-| `attributes.source_sensor` | Konfigurierter Quellsensor (mit `sql_raw_json`) |
-| `attributes.forecast_sensor` | Konfigurierter Forecast-Sensor |
 
 **Verwendung in Lovelace:**
 
 ```yaml
 type: markdown
-content: "{{ state_attr('sensor.pv_hist_lovelace', 'lovelace_card') }}"
+content: "{{ state_attr('sensor.pv_hist_remaining_today', 'lovelace_card') }}"
 ```
 
-Die Karte enthält: Prognose-Wert, Methode, Schnee-Warnung, historische Vergleichstabellä und stündliche Bewölkungstabelle für den Rest-PV-Zeitraum.
+Die Karte enthält: Prognose-Wert, Methode, Schnee-Warnung, historische Vergleichstabelle und stündliche Bewölkungstabelle für den Rest-PV-Zeitraum.
 
 ## Template-Variablen (intern)
 
@@ -133,8 +132,7 @@ condition:
         "weather_entity": "weather.forecast_home",
         "sensor_pv": "sensor.pv_panels_energy",
         "sensor_clouds": "sensor.pv_hist_cloud_coverage",    # Auto-Sensor wenn leer gelassen
-        "pv_history_days": 30,
-        "lovelace_sensor": "sensor.pv_hist_remaining_today"  # Quellsensor für Lovelace-Card
+        "pv_history_days": 30
     }
 }
 ```
