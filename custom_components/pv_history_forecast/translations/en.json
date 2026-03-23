@@ -1,0 +1,60 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "PV History Forecast",
+        "description": "The prefix defines the names of all sensors created (e.g. \"sql_pv\" → sensor.sql_pv_remaining_today / _min / _max / _tomorrow). Leave the database URL empty for the default HA database.",
+        "data": {
+          "sensor_prefix": "Sensor prefix (e.g. sql_pv)",
+          "db_url": "Database URL (optional — leave empty to use the default Home Assistant database)"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure PV History Forecast",
+        "description": "Update the sensors for the existing entry.\n\nIf **no** cloud sensor is selected, the auto-sensor is kept automatically.",
+        "data": {
+          "weather_entity": "Weather Entity (Required) - e.g. weather.forecast_home",
+          "sensor_clouds": "Cloud Coverage Sensor (Optional — leave empty: auto-sensor is kept, works from day 1)",
+          "pv_history_days": "Days of cloud history (default: 30)",
+          "sensor_pv": "PV Panel Energy Sensor (e.g. sensor.pv_panels_energy)"
+        }
+      },
+      "sensors": {
+        "title": "Configure Sensors",
+        "description": "Select sensors from the dropdown lists.\n\nIf **no** cloud coverage sensor is selected, the integration automatically creates a cloud coverage sensor. This sensor collects cloud data from the weather entity and works **from day 1**. LTS history (>10 days) builds up automatically.",
+        "data": {
+          "weather_entity": "Weather Entity (Required) - e.g. weather.forecast_home",
+          "sensor_clouds": "Cloud Coverage Sensor (Optional — leave empty: auto-sensor is created automatically, works from day 1)",
+          "pv_history_days": "Days of cloud history to use (only applies when a cloud coverage sensor is selected above; default: 30)",
+          "sensor_pv": "PV Panel Energy Sensor (e.g. sensor.pv_panels_energy)"
+        }
+      }
+    },
+    "error": {
+      "invalid_db_url": "Invalid database URL or connection failed",
+      "sqlite_required": "Only SQLite is supported! URL must start with 'sqlite://'.",
+      "weather_entity_required": "Weather entity is required",
+      "sensor_pv_required": "PV panel energy sensor is required",
+      "must_be_weather_entity": "Please select a weather entity from the list (weather.*)",
+      "must_be_sensor_entity": "Please select a sensor from the list (sensor.*)",
+      "sensor_pv_wrong_unit": "The PV sensor must use kWh or Wh as its unit (device class: energy)"
+    },
+    "abort": {
+      "already_configured": "This configuration already exists"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "PV History Forecast Options",
+        "description": "Update sensors and settings",
+        "data": {
+          "weather_entity": "Weather Entity (e.g. weather.forecast_home)",
+          "sensor_clouds": "Cloud Coverage Sensor (leave empty = auto-sensor)",
+          "pv_history_days": "Cloud history days",
+          "sensor_pv": "PV Panel Energy Sensor"
+        }
+      }
+    }
+  }
+}

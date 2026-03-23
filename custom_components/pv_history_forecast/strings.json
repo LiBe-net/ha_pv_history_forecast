@@ -1,0 +1,60 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "PV History Forecast",
+        "description": "Der Präfix bestimmt die Namen aller erstellten Sensoren (z.B. \"sql_pv\" → sensor.sql_pv_remaining_today / _min / _max / _tomorrow). Datenbank-URL leer lassen für Standard-HA-Datenbank.",
+        "data": {
+          "sensor_prefix": "Sensor-Präfix (z.B. sql_pv)",
+          "db_url": "Datenbank-URL (optional — leer lassen für Standard-Home-Assistant-Datenbank)"
+        }
+      },
+      "reconfigure": {
+        "title": "PV History Forecast neu konfigurieren",
+        "description": "Passe die Sensoren des bestehenden Eintrags an.\n\nWird **kein** Cloud-Sensor ausgewählt, wird der Auto-Sensor automatisch beibehalten.",
+        "data": {
+          "weather_entity": "Wetter Entity (Pflicht) - z.B. weather.forecast_home",
+          "sensor_clouds": "Cloud Coverage Sensor (Optional — leer lassen: Auto-Sensor wird beibehalten, ab Tag 1 nutzbar)",
+          "pv_history_days": "Tage Cloud-Verlauf (Standard: 30)",
+          "sensor_pv": "PV Panel Energie Sensor (z.B. sensor.pv_panels_energy)"
+        }
+      },
+      "sensors": {
+        "title": "Sensoren konfigurieren",
+        "description": "**WICHTIG**: Wählen Sie die Sensoren aus den Dropdown-Listen aus.\n\nWird **kein** Cloud-Sensor ausgewählt, legt die Integration automatisch einen Cloud-Coverage-Sensor an. Dieser sammelt Bewölkungsdaten von der Wetter-Entity und ist **ab Tag 1** nutzbar. LTS-Verlauf (>10 Tage) baut sich automatisch auf.",
+        "data": {
+          "weather_entity": "Wetter Entity (Pflicht) - z.B. weather.forecast_home",
+          "sensor_clouds": "Cloud Coverage Sensor (Optional — leer lassen: Auto-Sensor wird automatisch angelegt, ab Tag 1 nutzbar)",
+          "pv_history_days": "Tage Cloud-Verlauf (nur wirksam wenn Cloud-Sensor ausgewählt; Standard: 30)",
+          "sensor_pv": "PV Panel Energie Sensor (z.B. sensor.pv_panels_energy)"
+        }
+      }
+    },
+    "error": {
+      "invalid_db_url": "Ungültige Datenbankverbindungs-URL oder Verbindung fehlgeschlagen",
+      "sqlite_required": "Nur SQLite wird unterstützt! URL muss mit 'sqlite://' beginnen.",
+      "weather_entity_required": "Wetter Entity ist erforderlich",
+      "sensor_pv_required": "PV Panel Energie Sensor ist erforderlich",
+      "must_be_weather_entity": "Bitte wählen Sie eine Wetter Entity aus der Liste (weather.*)",
+      "must_be_sensor_entity": "Bitte wählen Sie einen Sensor aus der Liste (sensor.*)",
+      "sensor_pv_wrong_unit": "Der PV-Sensor muss die Einheit kWh oder Wh haben (Geräte-Klasse: energy)"
+    },
+    "abort": {
+      "already_configured": "Diese Konfiguration existiert bereits"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "PV History Forecast Optionen",
+        "description": "Aktualisiere die Sensoren und Einstellungen",
+        "data": {
+          "weather_entity": "Wetter Entity (z.B. weather.forecast_home)",
+          "sensor_clouds": "Cloud Coverage Sensor (leer = Auto-Sensor)",
+          "pv_history_days": "Cloud-Historien-Tage",
+          "sensor_pv": "PV Panel Energie Sensor"
+        }
+      }
+    }
+  }
+}

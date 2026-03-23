@@ -1,0 +1,70 @@
+# Beispiel-Automation für die HA SQL PV Forecast Integration
+# 
+# Diese Automation ruft den Wetter-Forecast Service alle 15 Minuten auf
+# und speichert die Daten für die SQL-Query.
+#
+# VORBEREITUNG:
+# 1. Kopieren Sie diese Datei nach automations.yaml oder erstellen Sie diese in Ihrer HA-Konfiguration
+# 2. Erstellen Sie einen Helper (input_text) zur Speicherung der Wetterdaten:
+#    - Name: weather_forecast_hourly
+#    - Entity ID: input_text.weather_forecast_hourly
+#    - (Alternativ: Template-Sensor, siehe Kommentare unten)
+
+alias: HA SQL PV - Wetterdaten abrufen (30 Min)
+description: Ruft den Wetter-Forecast alle 30 Minuten ab für die PV-Prognose
+
+trigger:
+  - platform: time_pattern
+    minutes: /30  # Alle 15 Minuten
+
+condition: []
+
+action:
+  - service: weather.get_forecasts
+    data:
+      type: hourly
+    target:
+      entity_id: weather.forecast_home
+    response_variable: forecast_response
+
+  - service: input_text.set_value
+    target:
+      entity_id: input_text.weather_forecast_hourly
+    data:
+      value: "{{ forecast_response.forecast.weather.forecast | to_json }}"
+
+mode: single
+
+---
+# ALTERNATIVE: Template-Sensor (nur zur Anzeige, nicht zur Speicherung)
+# 
+# Falls Sie einen reinen Template-Sensor für Debugging möchten:
+#
+# template:
+#   - sensor:
+#       - name: "Weather Forecast Hourly"
+#         unique_id: weather_forecast_hourly
+#         state: "{{ now().isoformat() }}"
+#         attributes:
+#           forecast: "{{ state_attr('weather.forecast_home', 'forecast') }}"
+
+---
+# SETUP DER INPUT_TEXT ENTITIES
+#
+# Fügen Sie dies zu Ihrer configuration.yaml oder erstellen Sie helpers.yaml hinzu:
+#
+# input_text:
+#   weather_forecast_hourly:
+#     name: Weather Forecast Hourly
+#     unit_of_measurement: "°C"
+#     icon: mdi:weather-partly-cloudy
+#     max: 5000  # Genug Speicher für JSON-Array
+
+---
+# ANPASSUNGEN:
+#
+# - weather.forecast_home: Ersetzen Sie mit Ihrer Weather Entity
+# - input_text.weather_forecast_hourly: Oder nutzen Sie den Namen aus der Integration
+# - minutes: /15: Ändern Sie zu "30" für 30-Minuten, "/10" für 10-Minuten, etc.
+#
+# Die Wetterdaten werden dann von der SQL-Query als JSON verarbeitet.
