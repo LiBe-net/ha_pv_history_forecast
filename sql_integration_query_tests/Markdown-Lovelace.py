@@ -1,14 +1,14 @@
-{# =================================================================
+﻿{# =================================================================
    PV-Tages-Restprognose – Lovelace Markdown Card (Variante B: Inline-Template)
-   Quellsensor:    sensor.sql_pv_remaining_today  (Attribut: sql_raw_json)
-   Forecast-Sensor: sensor.sql_pv_weather_forecast (Attribut: forecast)
+   Quellsensor:    sensor.pv_hist_remaining_today  (Attribut: sql_raw_json)
+   Forecast-Sensor: sensor.pv_hist_weather_forecast (Attribut: forecast)
 
    EMPFOHLEN: Statt dieses Inline-Templates lieber Variante A verwenden:
-   {{ state_attr('sensor.sql_pv_remaining_today', 'lovelace_card') }}
+   {{ state_attr('sensor.pv_hist_remaining_today', 'lovelace_card') }}
 
    Variante B: Diesen Inhalt direkt als Lovelace-Markdown-Card nutzen.
    ================================================================= #}
-{% set raw_json = state_attr('sensor.sql_pv_remaining_today', 'sql_raw_json') %}
+{% set raw_json = state_attr('sensor.pv_hist_remaining_today', 'sql_raw_json') %}
 {% if raw_json and raw_json != '[]' and raw_json is not none %}
   {% set data = raw_json | from_json %}
 
@@ -101,7 +101,7 @@
 {%- endfor %}
 
     {# 5. BEWÖLKUNG REST (stündliche Forecast-Tabelle) #}
-    {% set forecast = state_attr('sensor.sql_pv_weather_forecast', 'forecast') %}
+    {% set forecast = state_attr('sensor.pv_hist_weather_forecast', 'forecast') %}
     {% if forecast %}
 ### ☁️ Bewölkung Rest
 {# pv_start/pv_ende sind UTC-Zeiten aus SQL → Vergleich konsequent in UTC #}

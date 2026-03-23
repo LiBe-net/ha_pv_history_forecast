@@ -1,4 +1,4 @@
-# 🎉 FERTIG! SQL PV Forecast Integration - Abschluss
+﻿# 🎉 FERTIG! SQL PV Forecast Integration - Abschluss
 
 Diese Home Assistant HACS-Erweiterung ist vollständig erstellt und einsatzbereit!
 
@@ -94,7 +94,7 @@ cp -r ha_pv_history_forecast/custom_components/pv_history_forecast \
    - PV Sensor: `sensor.pv_panels_energy`
    - Forecast Sensor: `sensor.weather_forecast_hourly`
    - PV History: `30` Tage
-5. **Fertig!** Sensor sollte jetzt verfügbar sein: `sensor.sql_pv_forecast`
+5. **Fertig!** Sensor sollte jetzt verfügbar sein: `sensor.pv_hist_forecast`
 
 ## 🎨 Konfiguration
 
@@ -248,14 +248,14 @@ Sie haben eine vollständige, produktionsreife Home Assistant Integration erstel
 2. ✅ **In Dashboard anzeigen**
    ```yaml
    type: entity
-   entity: sensor.sql_pv_forecast
+   entity: sensor.pv_hist_forecast
    ```
 
 3. ✅ **In Automationen nutzen**
    ```yaml
    trigger:
      - platform: numeric_state
-       entity_id: sensor.sql_pv_forecast
+       entity_id: sensor.pv_hist_forecast
        above: 5.0
    ```
 

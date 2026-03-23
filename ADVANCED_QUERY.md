@@ -1,4 +1,4 @@
-# Advanced SQL Query & Template - Dokumentation
+﻿# Advanced SQL Query & Template - Dokumentation
 
 ## Überblick
 
@@ -340,7 +340,7 @@ Ergebnis: 14.2 kWh verbleibend (pessimistisches MIN)
 2. Klicken Sie: **+ INTEGRATION ERSTELLEN**
 3. Suchen Sie: **"SQL PV Forecast Sensor"**
 4. Folgen Sie dem Assistenten:
-   - **Schritt 1:** Sensor-Präfix (Standard: `sql_pv`) + optionale Datenbankverbindungs-URL
+   - **Schritt 1:** Sensor-Präfix (Standard: `pv_hist`) + optionale Datenbankverbindungs-URL
    - **Schritt 2:** Wetter-Entity, PV Energie Sensor, optional Cloud Coverage Sensor
 
 ### Automatische Query-Generierung
@@ -350,7 +350,7 @@ WITH vars AS (
     SELECT 
         'weather.forecast_home' as sensor_clouds,      -- Aus UI gewählt
         'sensor.pv_panels_energy' as sensor_pv,        -- Aus UI gewählt
-        'sensor.sql_pv_weather_forecast' as sensor_forecast,  -- Automatisch
+        'sensor.pv_hist_weather_forecast' as sensor_forecast,  -- Automatisch
         (strftime('%s', 'now', 'localtime') - strftime('%s', 'now')) || ' seconds' as offset
 )
 ```

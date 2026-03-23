@@ -1,4 +1,4 @@
-# Installationsanleitung
+﻿# Installationsanleitung
 
 ## Home Assistant HACS Installation
 
@@ -24,7 +24,7 @@ Der Konfigurationsassistent führt Sie in zwei Schritten:
 
 | Feld | Voreinstellung | Beschreibung |
 |------|---------------|-------------|
-| **Sensor-Präfix** | `sql_pv` | Basis aller Sensornamen. `sql_pv` → `sensor.sql_pv_remaining_today` etc. |
+| **Sensor-Präfix** | `pv_hist` | Basis aller Sensornamen. `pv_hist` → `sensor.pv_hist_remaining_today` etc. |
 | **Datenbankverbindungs-URL** | *(leer lassen)* | Leer = HA-Standard: `sqlite:////config/home-assistant_v2.db` |
 
 #### Schritt 2b — Sensoren auswählen
@@ -71,7 +71,7 @@ Nach der Konfiguration erstellt die Integration automatisch bis zu **7 Sensoren*
 | `sensor.{prefix}_cloud_coverage` | Auto-Bewölkungssensor *(nur wenn kein externer Cloud-Sensor gewählt)* |
 | `sensor.{prefix}_lovelace` | Vorberechnete Markdown-Card (Attribut `lovelace_card`) |
 
-Mit Standard-Präfix `sql_pv` heißt der Hauptsensor also `sensor.sql_pv_remaining_today`.
+Mit Standard-Präfix `pv_hist` heißt der Hauptsensor also `sensor.pv_hist_remaining_today`.
 
 Der Wetter-Forecast-Abruf startet automatisch alle 15 Minuten — **keine manuelle `configuration.yaml`-Konfiguration nötig**.
 
@@ -117,7 +117,7 @@ Der Sensor `sensor.{prefix}_lovelace` rendert automatisch eine vollständige Mar
 
 ```yaml
 type: markdown
-content: "{{ state_attr('sensor.sql_pv_lovelace', 'lovelace_card') }}"
+content: "{{ state_attr('sensor.pv_hist_lovelace', 'lovelace_card') }}"
 ```
 
 Die Karte enthält Prognose, historische Vergleichstage und stündliche Bewölkungstabelle.
@@ -144,7 +144,7 @@ sensor:
 Nach erfolgreicher Installation können Sie überprüfen:
 
 1. **Integrations-Seite**: "SQL PV Forecast Sensor" sollte in der Liste erscheinen
-2. **Neu hinzugefügter Sensor**: Ein neuer Sensor `sensor.sql_pv_forecast` sollte in der Entity-Liste vorhanden sein
+2. **Neu hinzugefügter Sensor**: Ein neuer Sensor `sensor.pv_hist_forecast` sollte in der Entity-Liste vorhanden sein
 3. **Logs überprüfen**: Gagen Sie nach Errors in den Home Assistant Logs
 
 ## Fehlerbehandlung

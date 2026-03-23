@@ -1,4 +1,4 @@
-# PV History Forecast
+﻿# PV History Forecast
 
 Eine Home Assistant HACS-Erweiterung für eine SQL-basierte PV-Ertragsprognose. Die Integration analysiert historische Bewölkungsverläufe und gleicht diese mit der aktuellen Wettervorhersage ab, um eine genaue Schätzung des verbleibenden und morgigen Solarertrags zu liefern.
 
@@ -17,19 +17,19 @@ Eine Home Assistant HACS-Erweiterung für eine SQL-basierte PV-Ertragsprognose. 
 
 ## Erzeugte Sensoren
 
-Nach der Konfiguration mit Präfix `sql_pv` (Standard) stehen folgende Sensoren bereit:
+Nach der Konfiguration mit Präfix `pv_hist` (Standard) stehen folgende Sensoren bereit:
 
 | Sensor | Beschreibung |
 |--------|--------------|
-| `sensor.sql_pv_remaining_today` | Verbleibender PV-Ertrag heute (kWh), Hauptsensor |
-| `sensor.sql_pv_remaining_min` | Pessimistische Tagesrest-Prognose (ähnliche Tage mit mehr Bewölkung) |
-| `sensor.sql_pv_remaining_max` | Optimistische Tagesrest-Prognose (ähnliche Tage mit weniger Bewölkung) |
-| `sensor.sql_pv_tomorrow` | Gewichtete Prognose für den Gesamtertrag morgen (kWh) |
-| `sensor.sql_pv_weather_forecast` | Interner Hilfssensor: stündliche Wettervorhersage (JSON) |
-| `sensor.sql_pv_cloud_coverage` | Auto-Bewölkungssensor (nur wenn kein externer Cloud-Sensor gewählt) |
-| `sensor.sql_pv_lovelace` | Vorberechnete Lovelace Markdown-Card (im Attribut `lovelace_card`) |
+| `sensor.pv_hist_remaining_today` | Verbleibender PV-Ertrag heute (kWh), Hauptsensor |
+| `sensor.pv_hist_remaining_min` | Pessimistische Tagesrest-Prognose (ähnliche Tage mit mehr Bewölkung) |
+| `sensor.pv_hist_remaining_max` | Optimistische Tagesrest-Prognose (ähnliche Tage mit weniger Bewölkung) |
+| `sensor.pv_hist_tomorrow` | Gewichtete Prognose für den Gesamtertrag morgen (kWh) |
+| `sensor.pv_hist_weather_forecast` | Interner Hilfssensor: stündliche Wettervorhersage (JSON) |
+| `sensor.pv_hist_cloud_coverage` | Auto-Bewölkungssensor (nur wenn kein externer Cloud-Sensor gewählt) |
+| `sensor.pv_hist_lovelace` | Vorberechnete Lovelace Markdown-Card (im Attribut `lovelace_card`) |
 
-Die Präfix-Bezeichnung (`sql_pv`) wird beim Setup frei gewählt — alle Sensornamen leiten sich davon ab.
+Die Präfix-Bezeichnung (`pv_hist`) wird beim Setup frei gewählt — alle Sensornamen leiten sich davon ab.
 
 ## Installation
 
@@ -48,7 +48,7 @@ Detaillierte Schritte: [INSTALLATION.md](INSTALLATION.md)
 
 | Feld | Standard | Beschreibung |
 |------|---------|-------------|
-| **Sensor-Präfix** | `sql_pv` | Basis für alle Sensornamen, z.B. `sql_pv` → `sensor.sql_pv_remaining_today` |
+| **Sensor-Präfix** | `pv_hist` | Basis für alle Sensornamen, z.B. `pv_hist` → `sensor.pv_hist_remaining_today` |
 | **Datenbankverbindungs-URL** | *(leer lassen)* | Leer = Home Assistant DB (`sqlite:////config/home-assistant_v2.db`) |
 
 ### Schritt 2 — Sensoren auswählen
@@ -71,13 +71,13 @@ vars → ids → pv_activity → forecast_val → forecast_next_day
      → cloud_history → matching_days → final_data → json_group_array(...)
 ```
 
-Das Ergebnis ist ein JSON-Array historischer Vergleichstage, gespeichert im Attribut `sql_raw_json` des Hauptsensors `sensor.sql_pv_remaining_today`.
+Das Ergebnis ist ein JSON-Array historischer Vergleichstage, gespeichert im Attribut `sql_raw_json` des Hauptsensors `sensor.pv_hist_remaining_today`.
 
 Technische Details: [ADVANCED_QUERY.md](ADVANCED_QUERY.md)
 
 ## Wetter-Vorhersage-Sensor (automatisch)
 
-Die Integration erstellt und pflegt `sensor.sql_pv_weather_forecast` automatisch alle **5 Minuten** über den HA-Service `weather.get_forecasts`. Eine manuelle `configuration.yaml`-Konfiguration ist **nicht nötig**.
+Die Integration erstellt und pflegt `sensor.pv_hist_weather_forecast` automatisch alle **5 Minuten** über den HA-Service `weather.get_forecasts`. Eine manuelle `configuration.yaml`-Konfiguration ist **nicht nötig**.
 
 ## Lovelace Dashboard Card
 
@@ -85,7 +85,7 @@ Der Sensor `sensor.{prefix}_lovelace` rendert alle 15 Minuten eine vollständige
 
 ```yaml
 type: markdown
-content: "{{ state_attr('sensor.sql_pv_lovelace', 'lovelace_card') }}"
+content: "{{ state_attr('sensor.pv_hist_lovelace', 'lovelace_card') }}"
 ```
 
 Der für die Karte genutzte Quellsensor (Standard: `sensor.{prefix}_remaining_today`) kann im Konfigurations-Assistenten angepasst werden.

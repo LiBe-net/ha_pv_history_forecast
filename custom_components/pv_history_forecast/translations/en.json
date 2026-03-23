@@ -1,11 +1,11 @@
-{
+﻿{
   "config": {
     "step": {
       "user": {
         "title": "PV History Forecast",
-        "description": "The prefix defines the names of all sensors created (e.g. \"sql_pv\" → sensor.sql_pv_remaining_today / _min / _max / _tomorrow). Leave the database URL empty for the default HA database.",
+        "description": "The prefix defines the names of all sensors created (e.g. \"pv_hist\" → sensor.pv_hist_remaining_today / _min / _max / _tomorrow). Leave the database URL empty for the default HA database.",
         "data": {
-          "sensor_prefix": "Sensor prefix (e.g. sql_pv)",
+          "sensor_prefix": "Sensor prefix (e.g. pv_hist)",
           "db_url": "Database URL (optional — leave empty to use the default Home Assistant database)"
         }
       },

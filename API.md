@@ -1,4 +1,4 @@
-# API Dokumentation
+﻿# API Dokumentation
 
 ## Übersicht
 
@@ -6,9 +6,9 @@ Die SQL PV Forecast Integration erzeugt aus einer einzigen Konfiguration 5 Senso
 
 ## Sensor Entities
 
-Mit dem Standard-Präfix `sql_pv` entstehen folgende Entities:
+Mit dem Standard-Präfix `pv_hist` entstehen folgende Entities:
 
-### `sensor.sql_pv_remaining_today` — Hauptsensor
+### `sensor.pv_hist_remaining_today` — Hauptsensor
 
 | Eigenschaft | Wert |
 |-------------|------|
@@ -37,19 +37,19 @@ Das Attribut `sql_raw_json` enthält ein JSON-Array mit je einem Objekt pro Verg
 ]
 ```
 
-### `sensor.sql_pv_remaining_min` — Pessimistisch
+### `sensor.pv_hist_remaining_min` — Pessimistisch
 
 Liest `sql_raw_json` vom Hauptsensor und wendet das MIN-Template an. Gibt die pessimistischste Prognose der top-5 ähnlichen Tage zurück.
 
-### `sensor.sql_pv_remaining_max` — Optimistisch
+### `sensor.pv_hist_remaining_max` — Optimistisch
 
 Wie `_min`, aber mit dem MAX-Template — optimistischste Prognose.
 
-### `sensor.sql_pv_tomorrow` — Morgen-Prognose
+### `sensor.pv_hist_tomorrow` — Morgen-Prognose
 
 Gewichteter Mittelwert des Gesamtertrags für morgen, astronomisch auf den nächsten Tag skaliert.
 
-### `sensor.sql_pv_weather_forecast` — Wetter-Helfer (intern)
+### `sensor.pv_hist_weather_forecast` — Wetter-Helfer (intern)
 
 | Eigenschaft | Wert |
 |-------------|------|
@@ -60,7 +60,7 @@ Gewichteter Mittelwert des Gesamtertrags für morgen, astronomisch auf den näch
 
 Wird von der SQL-Query genutzt (`f_id` in `ids` CTE). Aktualisierung alle 15 Minuten automatisch.
 
-### `sensor.sql_pv_cloud_coverage` — Auto-Bewölkungssensor
+### `sensor.pv_hist_cloud_coverage` — Auto-Bewölkungssensor
 
 *Wird nur erstellt, wenn im Wizard kein externer Cloud Coverage Sensor gewählt wurde.*
 
@@ -74,7 +74,7 @@ Der Sensor sammelt Bewölkungsdaten von der konfigurierten Wetter-Entity und reg
 
 > **SQL-Fallback**: Für Tage, an denen der Auto-Sensor noch keine LTS-Statistik hat, greift der SQL-`cloud_history`-CTE automatisch direkt auf die States der Wetter-Entity zurück.
 
-### `sensor.sql_pv_lovelace` — Lovelace Markdown-Card
+### `sensor.pv_hist_lovelace` — Lovelace Markdown-Card
 
 | Eigenschaft | Wert |
 |-------------|------|
@@ -87,7 +87,7 @@ Der Sensor sammelt Bewölkungsdaten von der konfigurierten Wetter-Entity und reg
 
 ```yaml
 type: markdown
-content: "{{ state_attr('sensor.sql_pv_lovelace', 'lovelace_card') }}"
+content: "{{ state_attr('sensor.pv_hist_lovelace', 'lovelace_card') }}"
 ```
 
 Die Karte enthält: Prognose-Wert, Methode, Schnee-Warnung, historische Vergleichstabellä und stündliche Bewölkungstabelle für den Rest-PV-Zeitraum.
@@ -106,14 +106,14 @@ Die abgeleiteten Sensoren (`_min`, `_max`, `_tomorrow`) erhalten beim Template-R
 ```yaml
 condition:
   - condition: numeric_state
-    entity_id: sensor.sql_pv_remaining_today
+    entity_id: sensor.pv_hist_remaining_today
     above: 2.0
 ```
 
 ### Beispiel: sql_raw_json in einer Template-Card
 
 ```jinja2
-{% set data = state_attr('sensor.sql_pv_remaining_today', 'sql_raw_json') | from_json %}
+{% set data = state_attr('sensor.pv_hist_remaining_today', 'sql_raw_json') | from_json %}
 {% if data and data | count > 0 %}
   Ähnlicher Tag: {{ data[0].datum }}
   Bewölkung hist.: {{ data[0].h_avg_gesamt }}%
@@ -128,13 +128,13 @@ condition:
     "version": 1,
     "domain": "pv_history_forecast",
     "data": {
-        "sensor_prefix": "sql_pv",
+        "sensor_prefix": "pv_hist",
         "db_url": "sqlite:////config/home-assistant_v2.db",  # oder None für Standard
         "weather_entity": "weather.forecast_home",
         "sensor_pv": "sensor.pv_panels_energy",
-        "sensor_clouds": "sensor.sql_pv_cloud_coverage",    # Auto-Sensor wenn leer gelassen
+        "sensor_clouds": "sensor.pv_hist_cloud_coverage",    # Auto-Sensor wenn leer gelassen
         "pv_history_days": 30,
-        "lovelace_sensor": "sensor.sql_pv_remaining_today"  # Quellsensor für Lovelace-Card
+        "lovelace_sensor": "sensor.pv_hist_remaining_today"  # Quellsensor für Lovelace-Card
     }
 }
 ```
@@ -155,10 +155,10 @@ automation:
       - service: notify.mobile_app
         data:
           message: >
-            Heute noch {{ states('sensor.sql_pv_remaining_today') }} kWh
-            (min: {{ states('sensor.sql_pv_remaining_min') }},
-             max: {{ states('sensor.sql_pv_remaining_max') }})
-            Morgen: {{ states('sensor.sql_pv_tomorrow') }} kWh
+            Heute noch {{ states('sensor.pv_hist_remaining_today') }} kWh
+            (min: {{ states('sensor.pv_hist_remaining_min') }},
+             max: {{ states('sensor.pv_hist_remaining_max') }})
+            Morgen: {{ states('sensor.pv_hist_tomorrow') }} kWh
 ```
 
 Vollständiges Beispiel: [automation_example.yaml](automation_example.yaml)

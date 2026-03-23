@@ -1,4 +1,4 @@
-# Quick-Start Guide
+﻿# Quick-Start Guide
 
 ## 5 Minuten bis zum funktionierenden Sensor
 
@@ -31,7 +31,7 @@ Folgen Sie dem zweiteiligen Assistenten:
 
 **Schritt 1 — Präfix & Datenbank:**
 ```
-Sensor-Präfix: sql_pv  (Standard, bestimmt alle Sensornamen)
+Sensor-Präfix: pv_hist  (Standard, bestimmt alle Sensornamen)
 DB URL:        (leer lassen → nutzt home-assistant_v2.db)
 ```
 
@@ -49,19 +49,19 @@ PV History Tage:            30  (Standard)
 
 Sie sollten jetzt bis zu **7 neue Sensoren** haben:
 ```
-sensor.sql_pv_remaining_today   ← verbleibender Ertrag heute
-sensor.sql_pv_remaining_min     ← pessimistische Prognose
-sensor.sql_pv_remaining_max     ← optimistische Prognose
-sensor.sql_pv_tomorrow          ← Gesamtprognose morgen
-sensor.sql_pv_weather_forecast  ← interner Wetter-Sensor
-sensor.sql_pv_cloud_coverage    ← Auto-Bewölkungssensor (wenn kein externer gewählt)
-sensor.sql_pv_lovelace          ← vorberechnete Lovelace Markdown-Card
+sensor.pv_hist_remaining_today   ← verbleibender Ertrag heute
+sensor.pv_hist_remaining_min     ← pessimistische Prognose
+sensor.pv_hist_remaining_max     ← optimistische Prognose
+sensor.pv_hist_tomorrow          ← Gesamtprognose morgen
+sensor.pv_hist_weather_forecast  ← interner Wetter-Sensor
+sensor.pv_hist_cloud_coverage    ← Auto-Bewölkungssensor (wenn kein externer gewählt)
+sensor.pv_hist_lovelace          ← vorberechnete Lovelace Markdown-Card
 ```
 
 **Lovelace Card einbinden:**
 ```yaml
 type: markdown
-content: "{{ state_attr('sensor.sql_pv_lovelace', 'lovelace_card') }}"
+content: "{{ state_attr('sensor.pv_hist_lovelace', 'lovelace_card') }}"
 ```
 
 ## Minimal Setup ohne existierende Sensoren
@@ -152,18 +152,18 @@ action:
 alias: "Notify on High PV Forecast"
 trigger:
   - platform: numeric_state
-    entity_id: sensor.sql_pv_forecast
+    entity_id: sensor.pv_hist_forecast
     above: 5.0
 action:
   - service: notify.mobile_app
     data:
-      message: "PV Forecast: {{ states('sensor.sql_pv_forecast') }} kWh"
+      message: "PV Forecast: {{ states('sensor.pv_hist_forecast') }} kWh"
 ```
 
 ### Dashboard Card
 ```yaml
 type: entity
-entity: sensor.sql_pv_forecast
+entity: sensor.pv_hist_forecast
 name: "PV Forecast"
 unit: kWh
 state_color: true

@@ -1,11 +1,11 @@
-{
+﻿{
   "config": {
     "step": {
       "user": {
         "title": "PV History Forecast",
-        "description": "Der Präfix bestimmt die Namen aller erstellten Sensoren (z.B. \"sql_pv\" → sensor.sql_pv_remaining_today / _min / _max / _tomorrow). Datenbank-URL leer lassen für Standard-HA-Datenbank.",
+        "description": "Der Präfix bestimmt die Namen aller erstellten Sensoren (z.B. \"pv_hist\" → sensor.pv_hist_remaining_today / _min / _max / _tomorrow). Datenbank-URL leer lassen für Standard-HA-Datenbank.",
         "data": {
-          "sensor_prefix": "Sensor-Präfix (z.B. sql_pv)",
+          "sensor_prefix": "Sensor-Präfix (z.B. pv_hist)",
           "db_url": "Datenbank-URL (optional — leer lassen für Standard-Home-Assistant-Datenbank)"
         }
       },

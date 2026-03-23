@@ -1,4 +1,4 @@
-# Feature Übersicht - SQL PV Forecast Integration
+﻿# Feature Übersicht - SQL PV Forecast Integration
 
 ## Implementierte Features (v1.2.7)
 
@@ -53,7 +53,7 @@
 
 | Feature | Status | Details |
 |---------|--------|---------|
-| Präfix-basiertes Setup | ✅ Fertig | Standard: `sql_pv`, alle Sensornamen abgeleitet |
+| Präfix-basiertes Setup | ✅ Fertig | Standard: `pv_hist`, alle Sensornamen abgeleitet |
 | GUI-Konfiguration | ✅ Fertig | Vollständiger 2-Schritt Config Flow |
 | Optionen-Flow | ✅ Fertig | Nachträgliche Änderungen möglich, automatisches Neuladen |
 | Validierung | ✅ Fertig | DB URL, Entity ID, PV-Einheit (kWh/Wh Pflicht) |

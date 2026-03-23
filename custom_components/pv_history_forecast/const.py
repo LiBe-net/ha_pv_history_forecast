@@ -1,4 +1,4 @@
-"""Constants for the HA SQL PV Forecast integration."""
+﻿"""Constants for the HA SQL PV Forecast integration."""
 from __future__ import annotations
 
 DOMAIN = "pv_history_forecast"
@@ -20,7 +20,7 @@ CONF_DEVICE_CLASS = "device_class"
 CONF_STATE_CLASS = "state_class"
 
 # Defaults
-DEFAULT_SENSOR_PREFIX = "sql_pv"
+DEFAULT_SENSOR_PREFIX = "pv_hist"
 DEFAULT_VALUE_TEMPLATE = """{# PV-PROGNOSE: Rest-Ertrag heute, gewichteter Mittelwert historisch ähnlicher Tage #}
 {% set raw = value %}
 {% if raw and raw != '[]' and raw is not none %}
