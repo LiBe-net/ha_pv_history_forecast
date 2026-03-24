@@ -144,10 +144,12 @@ SELECT json_group_array(
         -- Ertrag 0 nur wenn UTC-Jetztzeit ZWISCHEN pv_ende und lokalem Mitternacht (UTC).
         -- Vermeidet Fehlwert 0 in der Stunde nach lokalem Mitternacht (UTC 22-24 Uhr bei MEZ/MESZ),
         -- da '23:30' > '17:30' im Stringvergleich fälschlicherweise TRUE ergibt.
+        -- Return 0 whenever the current UTC time is outside the PV-active window.
+        -- sun_start and sun_end are stored in UTC (derived from HA state timestamps).
+        -- This correctly covers all nighttime hours including 23:00-00:00 UTC
+        -- (= 00:00-01:00 local CET), which the previous BETWEEN guard missed.
         'ertrag_tag_rest', ROUND(CASE 
-            WHEN (CAST(strftime('%H', 'now') AS INT) * 60 + CAST(strftime('%M', 'now') AS INT))
-                 BETWEEN (CAST(substr((SELECT sun_end FROM pv_activity), 1, 2) AS INT) * 60 + CAST(substr((SELECT sun_end FROM pv_activity), 4, 2) AS INT))
-                     AND (24 * 60 - (strftime('%s', 'now', 'localtime') - strftime('%s', 'now')) / 60)
+            WHEN NOT (strftime('%H:%M', 'now') BETWEEN (SELECT sun_start FROM pv_activity) AND (SELECT sun_end FROM pv_activity))
                 THEN 0.0
             ELSE MAX(0, 
                 ((h_hour_curr - h_hour_prev) * (1.0 - (CAST(strftime('%M', 'now') AS FLOAT) / 60.0)) * 

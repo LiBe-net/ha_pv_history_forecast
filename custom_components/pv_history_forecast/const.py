@@ -419,9 +419,7 @@ SELECT COALESCE(json_group_array(
         'h_avg_rest', ROUND(h_avg_rest_val, 1),
         'ertrag_tag_gesamt', ROUND((day_max - day_min) / (SELECT pv_divisor FROM vars), 2),
         'ertrag_tag_rest', ROUND(CASE 
-            WHEN (CAST(strftime('%H', 'now') AS INT) * 60 + CAST(strftime('%M', 'now') AS INT))
-                 BETWEEN (CAST(substr((SELECT sun_end FROM pv_activity), 1, 2) AS INT) * 60 + CAST(substr((SELECT sun_end FROM pv_activity), 4, 2) AS INT))
-                     AND (24 * 60 - (strftime('%s', 'now', 'localtime') - strftime('%s', 'now')) / 60)
+            WHEN NOT (strftime('%H:%M', 'now') BETWEEN (SELECT sun_start FROM pv_activity) AND (SELECT sun_end FROM pv_activity))
                 THEN 0.0
             ELSE MAX(0, 
                 ((h_hour_curr - h_hour_prev) * (1.0 - (CAST(strftime('%M', 'now') AS FLOAT) / 60.0)) * 
@@ -441,9 +439,9 @@ FROM final_data
 WHERE day_max > 0"""
 
 DEFAULT_LOVELACE_TEMPLATE = """{# =================================================================
-   PV-Tages-Restprognose – Lovelace Markdown Card
-   Forecast: __FORECAST_SENSOR__ (Attribut: forecast)
-   raw_json wird direkt als Template-Variable übergeben.
+   PV remaining yield today – Lovelace Markdown Card
+   Forecast sensor: __FORECAST_SENSOR__ (attribute: forecast)
+   raw_json is passed directly as a template variable.
    ================================================================= #}
 {% if raw_json and raw_json != '[]' and raw_json is not none %}
   {% set data = raw_json | from_json %}
@@ -503,18 +501,18 @@ DEFAULT_LOVELACE_TEMPLATE = """{# ==============================================
     {% set brighter = pool | selectattr('h_avg', 'lt', f_avg) | list %}
     {% set darker = pool | selectattr('h_avg', 'gt', f_avg) | list %}
     {% set res = 0 %}
-    {% set methode = "Keine Daten" %}
+    {% set methode = "No data" %}
 
-    {# 4. ENTSCHEIDUNGSLOGIK #}
+    {# 4. Decision logic #}
     {% if brighter | count > 0 and darker | count == 0 %}
-      {% set methode = "Licht-Reduktion" %}
+      {% set methode = "Light reduction" %}
       {% set worst_day = brighter | sort(attribute='y_korr') | first %}
       {% set res = worst_day.y_korr * ([120 - f_avg, 5.0] | max / [120 - worst_day.h_avg, 5.0] | max) %}
     {% elif darker | count > 0 and pool | selectattr('h_avg', 'le', f_avg) | list | count == 0 %}
-      {% set methode = "Max-Annahme" %}
+      {% set methode = "Max assumption" %}
       {% set res = darker | map(attribute='y_korr') | max %}
     {% elif pool | count > 0 %}
-      {% set methode = "Gewichteter Mittelwert" %}
+      {% set methode = "Weighted average" %}
       {% set ns_mix = namespace(ws=0) %}
       {% for item in pool %}
         {% set ns_mix.ws = ns_mix.ws + (item.y_korr * item.w) %}
@@ -525,45 +523,20 @@ DEFAULT_LOVELACE_TEMPLATE = """{# ==============================================
     {% set scale = 1000 if res > 200 else 1 %}
     {% set final_val = (res / scale) * schnee_faktor_heute %}
 
-**Prognose:**
+**Forecast:**
 ## {{ final_val | round(2) }} kWh
-*Basis: **{{ f_avg }}%** Wolken | **{{ methode }}***
-{% if schnee_faktor_heute < 1.0 %}⚠️ **Schnee-Verdacht! ({{ (schnee_faktor_heute * 100) | round(0) }}%)**{% endif %}
+*Basis: **{{ f_avg }}%** clouds | **{{ methode }}***
+{% if schnee_faktor_heute < 1.0 %}⚠️ **Snow suspected! ({{ (schnee_faktor_heute * 100) | round(0) }}%)**{% endif %}
 
-| Datum | Tag-Wolken | Tag-Ertrag | Rest-Wolken | Rest-Ertrag | Einfluss |
+| Date | Day clouds | Day yield | Rem. clouds | Rem. yield | Weight |
 | :--- | :---: | :---: | :---: | :---: | :---: |
 {%- for item in ns_pool.items | sort(attribute='w', reverse=True) %}
 | {{ item.datum }} | {{ item.h_avg_gesamt }}% | {{ item.ertrag_tag_gesamt }} | **{{ item.h_avg }}%** | **{{ ((item.y_korr * schnee_faktor_heute) / scale) | round(2) }} <small><small>({{ item.s_fakt | round(2) }}x)</small></small>**{% if item.filtered %}❌{% endif %} | {{ (((item.w / ns_pool.total_w) * 100) if ns_pool.total_w > 0 else 0) | round(1) }}% |
 {%- endfor %}
 
-    {# 5. BEWÖLKUNG REST (stündliche Forecast-Tabelle) #}
-    {% set forecast = state_attr('__FORECAST_SENSOR__', 'forecast') %}
-    {% if forecast %}
-### ☁️ Bewölkung Rest
-{% set current_time = utcnow().strftime('%H:%M') %}
-{% set pv_ende = data[0].pv_ende if data[0].pv_ende is defined else '17:00' %}
-{% set pv_start = data[0].pv_start if data[0].pv_start is defined else '05:00' %}
-{% set start_time = pv_start if pv_start > current_time else current_time %}
-*Zeitfenster: {{ start_time }} bis {{ pv_ende }}*
-
-| Uhrzeit | Wolken (%) |
-| :--- | :---: |
-{%- for hour in forecast %}
-  {%- set hour_dt = as_datetime(hour.datetime) %}
-  {%- if hour_dt is not none %}
-    {%- set hour_time = hour_dt.strftime('%H:%M') %}
-    {%- if hour_dt.date() == utcnow().date() and hour_time >= start_time and hour_time <= pv_ende %}
-| {{ hour_time }} | {{ hour.cloud_coverage | float(default=0) }} % |
-    {%- endif %}
-  {%- endif %}
-{%- endfor %}
-    {% else %}
-⚠️ Keine Forecast-Daten gefunden.
-    {% endif %}
-
   {% else %}
-**Keine Daten im SQL-Ergebnis vorhanden.**
+**No data in SQL result.**
   {% endif %}
 {% else %}
-**Warte auf SQL-Daten...**
+**Waiting for SQL data...**
 {% endif %}"""
