@@ -36,7 +36,7 @@
   
   {% set res = 0 %}
   {% if top_5 | count > 0 %}
-    {% if brighter | count > 0 and darker | count == 0 %}
+    {% if brighter | count > 0 and (top_5 | selectattr('h_avg', 'ge', f_avg) | list | count == 0) %}
       {# Case A: Light reduction #}
       {% set worst = brighter | sort(attribute='y_korr') | first %}
       {% set f_today = [120 - f_avg, 5.0] | max %}

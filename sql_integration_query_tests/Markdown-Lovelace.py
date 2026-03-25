@@ -70,7 +70,7 @@
     {% set method = "No data" %}
 
     {# 4. Decision logic #}
-    {% if brighter | count > 0 and darker | count == 0 %}
+    {% if brighter | count > 0 and (pool | selectattr('h_avg', 'ge', f_avg) | list | count == 0) %}
       {% set method = "Light reduction" %}
       {% set worst_day = brighter | sort(attribute='y_korr') | first %}
       {% set res = worst_day.y_korr * ([120 - f_avg, 5.0] | max / [120 - worst_day.h_avg, 5.0] | max) %}
