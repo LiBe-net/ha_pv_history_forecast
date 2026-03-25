@@ -1,4 +1,4 @@
-{% set raw_json = state_attr('sensor.pv_hist_remaining_today', 'sql_raw_json') %}
+{% set raw_json = state_attr('sensor.pv_remaining_states', 'json') %}
 {% if raw_json and raw_json != '[]' and raw_json is not none %}
   {% set data = raw_json | from_json %}
   {% set f_avg = data[0].f_avg_today_remaining | float(0) %}
