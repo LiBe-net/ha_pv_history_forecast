@@ -8,7 +8,7 @@
 
    Option B: Use this content directly as a Lovelace Markdown card.
    ================================================================= #}
-{% set raw_json = state_attr('sensor.pv_hist_remaining_today', 'sql_raw_json') %}
+{% set raw_json = state_attr('sensor.pv_remaining_states', 'json') %}
 {% if raw_json and raw_json != '[]' and raw_json is not none %}
   {% set data = raw_json | from_json %}
 
@@ -29,7 +29,7 @@
       {% endif %}
     {% endif %}
 
-    {# 2. ASTRONOMICAL BASE DATA (latitude from zone.home) #}
+    {# 2. ASTRONOMISCHE BASISDATEN (Breitengrad aus zone.home) #}
     {% set latitude = state_attr('zone.home', 'latitude') | float(48.0) %}
     {% set doy = now().strftime('%j') | int(default=1) %}
     {% set lat_rad = latitude * pi / 180 %}
@@ -38,7 +38,7 @@
     {% set dl_today = 24 / pi * acos([[cos_ha, -1.0] | max, 1.0] | min) %}
     {% set sun_today = 0.65 + 0.35 * cos((doy - 172) * 2 * pi / 365) %}
 
-    {# 3. BUILD DATA POOL #}
+    {# 3. POOL AUFBAUEN #}
     {% set ns_pool = namespace(items=[], total_w=0) %}
     {% for item in data %}
       {% set yield_raw = item.yield_day_remaining | float(default=0) %}
