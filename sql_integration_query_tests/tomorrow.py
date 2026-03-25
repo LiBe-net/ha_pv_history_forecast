@@ -44,7 +44,7 @@
   {% set darker = pool | selectattr('h_avg', 'gt', f_avg_tomorrow) | list %}
   {% set res = 0 %}
 
-  {% if brighter | count > 0 and darker | count == 0 %}
+  {% if brighter | count > 0 and darker | count == 0 and f_avg_tomorrow < 100 %}
     {# Case A: tomorrow brighter than all pool days → light reduction based on worst day #}
     {% set worst_day = brighter | sort(attribute='y_korr') | first %}
     {% set res = worst_day.y_korr * ([120 - f_avg_tomorrow, 5.0] | max / [120 - worst_day.h_avg, 5.0] | max) %}
