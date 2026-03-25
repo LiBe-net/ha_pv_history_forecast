@@ -59,7 +59,7 @@ forecast_val AS (
          json_each(a.shared_attrs, '$.forecast') f 
          WHERE s.metadata_id = (SELECT f_id FROM ids) 
            AND s.last_updated_ts = (SELECT MAX(last_updated_ts) FROM states WHERE metadata_id = (SELECT f_id FROM ids)) 
-           -- Abgleich des Forecast-Datums mit dem lokalen "Heute" (via Offset)
+           -- Match forecast date against local "today" (via UTC offset)
            AND substr(json_extract(f.value, '$.datetime'), 1, 10) = date('now', (SELECT offset FROM vars))
            AND substr(json_extract(f.value, '$.datetime'), 12, 5) 
                BETWEEN CASE 
@@ -81,7 +81,7 @@ forecast_next_day AS (
           AND s.last_updated_ts = (SELECT MAX(last_updated_ts) FROM states WHERE metadata_id = (SELECT f_id FROM ids)) 
           AND substr(json_extract(f.value, '$.datetime'), 1, 10) = date('now', (SELECT offset FROM vars), '+1 day') 
           AND substr(json_extract(f.value, '$.datetime'), 12, 5) BETWEEN (SELECT sun_start FROM pv_activity) AND (SELECT sun_end FROM pv_activity)
-    ), 50.0) as f_avg_morgen
+    ), 50.0) as f_avg_tomorrow
 ),
 
 cloud_history AS (
@@ -135,22 +135,21 @@ final_data AS (
 /* Generiert das finale JSON-Objekt für Home Assistant */
 SELECT json_group_array(
     json_object(
-        'datum', day,
-        'f_avg_heute_rest', (SELECT ROUND(f_avg, 1) FROM forecast_val),        
-        'f_avg_morgen', (SELECT ROUND(f_avg_morgen, 1) FROM forecast_next_day),
-        'h_avg_gesamt', ROUND(h_avg_total_val, 1),
-        'h_avg_rest', ROUND(h_avg_rest_val, 1),
-        'ertrag_tag_gesamt', ROUND(day_max - day_min, 2),
-        -- Ertrag 0 nur wenn UTC-Jetztzeit ZWISCHEN pv_ende und lokalem Mitternacht (UTC).
-        -- Vermeidet Fehlwert 0 in der Stunde nach lokalem Mitternacht (UTC 22-24 Uhr bei MEZ/MESZ),
-        -- da '23:30' > '17:30' im Stringvergleich fälschlicherweise TRUE ergibt.
-        -- Return 0 whenever the current UTC time is outside the PV-active window.
-        -- sun_start and sun_end are stored in UTC (derived from HA state timestamps).
-        -- This correctly covers all nighttime hours including 23:00-00:00 UTC
-        -- (= 00:00-01:00 local CET), which the previous BETWEEN guard missed.
-        'ertrag_tag_rest', ROUND(CASE 
-            WHEN NOT (strftime('%H:%M', 'now') BETWEEN (SELECT sun_start FROM pv_activity) AND (SELECT sun_end FROM pv_activity))
+        'date', day,
+        'f_avg_today_remaining', (SELECT ROUND(f_avg, 1) FROM forecast_val),        
+        'f_avg_tomorrow', (SELECT ROUND(f_avg_tomorrow, 1) FROM forecast_next_day),
+        'h_avg_total', ROUND(h_avg_total_val, 1),
+        'h_avg_remaining', ROUND(h_avg_rest_val, 1),
+        'yield_day_total', ROUND(day_max - day_min, 2),
+        -- Dreistufige Logik für den Restertrag (alle Zeiten in UTC):
+        -- 1. Vor Sonnenaufgang (00:00 bis sun_start): Gesamter Tagesertrag als Prognose.
+        -- 2. Im PV-Fenster (sun_start bis sun_end): Verbleibender Restertrag ab jetzt.
+        -- 3. Nach Sonnenuntergang (sun_end bis 23:59): 0.0 (Tag abgeschlossen).
+        'yield_day_remaining', ROUND(CASE 
+            WHEN strftime('%H:%M', 'now') > (SELECT sun_end FROM pv_activity)
                 THEN 0.0
+            WHEN strftime('%H:%M', 'now') < (SELECT sun_start FROM pv_activity)
+                THEN (day_max - day_min)
             ELSE MAX(0, 
                 ((h_hour_curr - h_hour_prev) * (1.0 - (CAST(strftime('%M', 'now') AS FLOAT) / 60.0)) * 
                   CASE 
@@ -162,6 +161,6 @@ SELECT json_group_array(
             )
         END, 2),
         'pv_start', (SELECT sun_start FROM pv_activity),
-        'pv_ende', (SELECT sun_end FROM pv_activity)
+        'pv_end', (SELECT sun_end FROM pv_activity)
     )
 ) as json FROM final_data WHERE day_max > 0;

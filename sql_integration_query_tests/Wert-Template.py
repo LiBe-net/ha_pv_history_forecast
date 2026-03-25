@@ -1,45 +1,58 @@
-{# PV-PROGNOSE LOGIK: Berechnet den Rest-Ertrag basierend auf historisch ähnlichen Tagen #}
-{% set raw = value %}
+{# PV FORECAST LOGIC: Calculates remaining yield based on historically similar days #}
+{# Standalone test: reads from sensor attribute when 'value' is not passed by the sensor. #}
+{% set raw = value if value is defined else state_attr('sensor.pv_hist_remaining_today', 'sql_raw_json') %}
 
 {% if raw and raw != '[]' and raw is not none %}
   {% set data = raw | from_json %}
-  
 
-    {# --- 1. BASIS-DATEN --- #}
-    {% set f_avg = data[0].f_avg_heute_rest | float(default=50.0) %}
+  {# --- 0. NIGHT-CHECK (UTC-correct: pv_end is UTC time from SQL) ---
+     Window [pv_end .. local midnight in UTC) → yield 0.
+     UTC after local midnight (e.g. 23:30 UTC = 00:30 CET) = new day, no production yet. #}
+  {% set now_min = utcnow().hour * 60 + utcnow().minute %}
+  {% set pv_end = data[0].pv_end | default('17:00') %}
+  {% set end_min = (pv_end.split(':')[0] | int) * 60 + (pv_end.split(':')[1] | int) %}
+  {% set offset_min = (now().utcoffset().total_seconds() / 60) | int %}
+  {% set midnight_utc_min = (24 * 60 - offset_min) % (24 * 60) %}
+
+  {% if end_min <= now_min < midnight_utc_min %}
+    0.0
+  {% else %}
+
+    {# --- 1. BASE DATA --- #}
+    {% set f_avg = data[0].f_avg_today_remaining | float(default=50.0) %}
     {% set current_month = now().month %}
-    {% set schnee_faktor_heute = 1.0 %}
+    {% set snow_factor_today = 1.0 %}
 
-    {# --- 2. SAISONALE SCHNEE-ERKENNUNG (Nur Dez, Jan, Feb) --- #}
+    {# --- 2. SEASONAL SNOW DETECTION (Dec, Jan, Feb only) --- #}
     {% if current_month in [12, 1, 2] %}
-      {% set gestern_datum = (now() - timedelta(days=1)).strftime('%Y-%m-%d') %}
-      {% set gestern_data = data | selectattr('datum', 'equalto', gestern_datum) | list | first %}
+      {% set yesterday_date = (now() - timedelta(days=1)).strftime('%Y-%m-%d') %}
+      {% set yesterday_data = data | selectattr('date', 'equalto', yesterday_date) | list | first %}
 
-      {% if gestern_data is defined %}
-        {% set y_rest_gestern = gestern_data.ertrag_tag_rest | float(default=0) %}
-        {% set h_rest_gestern = gestern_data.h_avg_rest | float(default=0) %}
-        {% set perf_gestern = y_rest_gestern / ([105 - h_rest_gestern, 5] | max) %}
-        {% if perf_gestern < 0.02 %}
-          {% set schnee_faktor_heute = 0.1 %}
+      {% if yesterday_data is defined %}
+        {% set yesterday_yield = yesterday_data.yield_day_remaining | float(default=0) %}
+        {% set yesterday_h_avg = yesterday_data.h_avg_remaining | float(default=0) %}
+        {% set yesterday_perf = yesterday_yield / ([105 - yesterday_h_avg, 5] | max) %}
+        {% if yesterday_perf < 0.02 %}
+          {% set snow_factor_today = 0.1 %}
         {% endif %}
       {% endif %}
     {% endif %}
 
-    {# --- 3. ASTRONOMISCHE BASISDATEN (ortsgenau via Breitengrad aus HA-Standort) --- #}
-    {# latitude wird als Template-Variable vom Sensor übergeben (hass.config.latitude) #}
+    {# --- 3. ASTRONOMICAL BASE DATA (location-specific via latitude from HA config) --- #}
     {% set day_of_year = now().strftime('%j') | int(default=1) %}
+    {% set latitude = latitude if latitude is defined else state_attr('zone.home', 'latitude') | float(48.0) %}
     {% set lat_rad = latitude * pi / 180 %}
     {% set decl = -0.4093 * cos(2 * pi * (day_of_year + 10) / 365) %}
     {% set cos_ha = -tan(lat_rad) * tan(decl) %}
     {% set dl_today = 24 / pi * acos([[cos_ha, -1.0] | max, 1.0] | min) %}
     {% set sun_today = 0.65 + 0.35 * cos((day_of_year - 172) * 2 * pi / 365) %}
 
-    {# --- 4. DATEN-POOL AUFBEREITEN --- #}
+    {# --- 4. BUILD DATA POOL --- #}
     {% set ns_pool = namespace(items=[], total_w=0) %}
     {% for item in data %}
-      {% set yield_raw = item.ertrag_tag_rest | float(default=0) %}
-      {% set clouds = item.h_avg_rest | float(default=0) %}
-      {% set dt_item = as_datetime(item.datum) %}
+      {% set yield_raw = item.yield_day_remaining | float(default=0) %}
+      {% set clouds = item.h_avg_remaining | float(default=0) %}
+      {% set dt_item = as_datetime(item.date) %}
       
       {% if dt_item is not none %}
         {% set item_day = dt_item.strftime('%j') | int(default=1) %}
@@ -58,7 +71,7 @@
       {% endif %}
     {% endfor %}
 
-    {# --- 5. PROGNOSE-BERECHNUNG --- #}
+    {# --- 5. FORECAST CALCULATION --- #}
     {% set pool = ns_pool.items %}
     {% set brighter = pool | selectattr('h_avg', 'lt', f_avg) | list %}
     {% set darker = pool | selectattr('h_avg', 'gt', f_avg) | list %}
@@ -77,10 +90,11 @@
       {% set res = ns_mix.ws / (ns_pool.total_w if ns_pool.total_w > 0 else 1) %}
     {% endif %}
 
-    {# --- 6. FINALE SKALIERUNG --- #}
-    {% set final_val = (res / (1000 if res > 200 else 1)) * schnee_faktor_heute %}
+    {# --- 6. FINAL SCALING --- #}
+    {% set final_val = (res / (1000 if res > 200 else 1)) * snow_factor_today %}
     {{ final_val | round(2) }}
 
+  {% endif %}
 {% else %}
   0.0
 {% endif %}

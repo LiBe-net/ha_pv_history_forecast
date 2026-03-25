@@ -21,44 +21,44 @@ CONF_STATE_CLASS = "state_class"
 
 # Defaults
 DEFAULT_SENSOR_PREFIX = "pv_hist"
-DEFAULT_VALUE_TEMPLATE = """{# PV-PROGNOSE: Rest-Ertrag heute, gewichteter Mittelwert historisch ähnlicher Tage #}
+DEFAULT_VALUE_TEMPLATE = """{# PV FORECAST: Remaining yield today, weighted average of historically similar days #}
 {% set raw = value %}
 {% if raw and raw != '[]' and raw is not none %}
   {% set data = raw | from_json %}
 
-  {# --- 0. NACHT-CHECK (UTC-korrekt: pv_ende ist UTC-Zeit aus SQL) ---
-     Fenster [pv_ende .. lokale Mitternacht in UTC) → Ertrag 0.
-     UTC nach lokaler Mitternacht (z.B. 23:30 UTC = 00:30 MEZ) = neuer Tag, noch keine Produktion. #}
+  {# --- 0. NIGHT-CHECK (UTC-correct: pv_end is UTC time from SQL) ---
+     Window [pv_end .. local midnight in UTC) → yield 0.
+     UTC after local midnight (e.g. 23:30 UTC = 00:30 CET) = new day, no production yet. #}
   {% set now_min = utcnow().hour * 60 + utcnow().minute %}
-  {% set pv_ende = data[0].pv_ende | default('17:00') %}
-  {% set ende_min = (pv_ende.split(':')[0] | int) * 60 + (pv_ende.split(':')[1] | int) %}
+  {% set pv_end = data[0].pv_end | default('17:00') %}
+  {% set end_min = (pv_end.split(':')[0] | int) * 60 + (pv_end.split(':')[1] | int) %}
   {% set offset_min = (now().utcoffset().total_seconds() / 60) | int %}
   {% set midnight_utc_min = (24 * 60 - offset_min) % (24 * 60) %}
 
-  {% if ende_min <= now_min < midnight_utc_min %}
+  {% if end_min <= now_min < midnight_utc_min %}
     0.0
   {% else %}
 
-    {# --- 1. BASIS-DATEN --- #}
-    {% set f_avg = data[0].f_avg_heute_rest | float(default=50.0) %}
+    {# --- 1. BASE DATA --- #}
+    {% set f_avg = data[0].f_avg_today_remaining | float(default=50.0) %}
     {% set current_month = now().month %}
-    {% set schnee_faktor_heute = 1.0 %}
+    {% set snow_factor_today = 1.0 %}
 
-    {# --- 2. SAISONALE SCHNEE-ERKENNUNG (Nur Dez, Jan, Feb) --- #}
+    {# --- 2. SEASONAL SNOW DETECTION (Dec, Jan, Feb only) --- #}
     {% if current_month in [12, 1, 2] %}
-      {% set gestern_datum = (now() - timedelta(days=1)).strftime('%Y-%m-%d') %}
-      {% set gestern_data = data | selectattr('datum', 'equalto', gestern_datum) | list | first %}
-      {% if gestern_data is defined %}
-        {% set y_rest_gestern = gestern_data.ertrag_tag_rest | float(default=0) %}
-        {% set h_rest_gestern = gestern_data.h_avg_rest | float(default=0) %}
-        {% set perf_gestern = y_rest_gestern / ([105 - h_rest_gestern, 5] | max) %}
-        {% if perf_gestern < 0.02 %}
-          {% set schnee_faktor_heute = 0.1 %}
+      {% set yesterday_date = (now() - timedelta(days=1)).strftime('%Y-%m-%d') %}
+      {% set yesterday_data = data | selectattr('date', 'equalto', yesterday_date) | list | first %}
+      {% if yesterday_data is defined %}
+        {% set yesterday_yield = yesterday_data.yield_day_remaining | float(default=0) %}
+        {% set yesterday_h_avg = yesterday_data.h_avg_remaining | float(default=0) %}
+        {% set yesterday_perf = yesterday_yield / ([105 - yesterday_h_avg, 5] | max) %}
+        {% if yesterday_perf < 0.02 %}
+          {% set snow_factor_today = 0.1 %}
         {% endif %}
       {% endif %}
     {% endif %}
 
-    {# --- 3. ASTRONOMISCHE BASISDATEN (ortsgenau via Breitengrad aus HA-Standort) --- #}
+    {# --- 3. ASTRONOMICAL BASE DATA (location-specific via latitude from HA config) --- #}
     {% set doy = now().strftime('%j') | int(default=1) %}
     {% set lat_rad = latitude * pi / 180 %}
     {% set decl = -0.4093 * cos(2 * pi * (doy + 10) / 365) %}
@@ -66,12 +66,12 @@ DEFAULT_VALUE_TEMPLATE = """{# PV-PROGNOSE: Rest-Ertrag heute, gewichteter Mitte
     {% set dl_today = 24 / pi * acos([[cos_ha, -1.0] | max, 1.0] | min) %}
     {% set sun_today = 0.65 + 0.35 * cos((doy - 172) * 2 * pi / 365) %}
 
-    {# --- 4. DATEN-POOL AUFBEREITEN --- #}
+    {# --- 4. BUILD DATA POOL --- #}
     {% set ns_pool = namespace(items=[], total_w=0) %}
     {% for item in data %}
-      {% set yield_raw = item.ertrag_tag_rest | float(default=0) %}
-      {% set clouds = item.h_avg_rest | float(default=0) %}
-      {% set dt_item = as_datetime(item.datum) %}
+      {% set yield_raw = item.yield_day_remaining | float(default=0) %}
+      {% set clouds = item.h_avg_remaining | float(default=0) %}
+      {% set dt_item = as_datetime(item.date) %}
       {% if dt_item is not none %}
         {% set item_day = dt_item.strftime('%j') | int(default=1) %}
         {% set decl_i = -0.4093 * cos(2 * pi * (item_day + 10) / 365) %}
@@ -88,7 +88,7 @@ DEFAULT_VALUE_TEMPLATE = """{# PV-PROGNOSE: Rest-Ertrag heute, gewichteter Mitte
       {% endif %}
     {% endfor %}
 
-    {# --- 5. PROGNOSE-BERECHNUNG --- #}
+    {# --- 5. FORECAST CALCULATION --- #}
     {% set pool = ns_pool.items %}
     {% set brighter = pool | selectattr('h_avg', 'lt', f_avg) | list %}
     {% set darker = pool | selectattr('h_avg', 'gt', f_avg) | list %}
@@ -106,8 +106,8 @@ DEFAULT_VALUE_TEMPLATE = """{# PV-PROGNOSE: Rest-Ertrag heute, gewichteter Mitte
       {% set res = ns_mix.ws / (ns_pool.total_w if ns_pool.total_w > 0 else 1) %}
     {% endif %}
 
-    {# --- 6. FINALE SKALIERUNG --- #}
-    {% set final_val = (res / (1000 if res > 200 else 1)) * schnee_faktor_heute %}
+    {# --- 6. FINAL SCALING --- #}
+    {% set final_val = (res / (1000 if res > 200 else 1)) * snow_factor_today %}
     {{ final_val | round(2) }}
 
   {% endif %}
@@ -120,14 +120,14 @@ DEFAULT_VALUE_TEMPLATE_MIN = """{# PV-PROGNOSE MINIMUM: Pessimistischer Tagesres
 {% if raw and raw != '[]' and raw is not none %}
   {% set data = raw | from_json %}
   {% set now_min = utcnow().hour * 60 + utcnow().minute %}
-  {% set pv_ende = data[0].pv_ende | default('17:00') %}
-  {% set ende_min = (pv_ende.split(':')[0] | int) * 60 + (pv_ende.split(':')[1] | int) %}
+  {% set pv_end = data[0].pv_end | default('17:00') %}
+  {% set end_min = (pv_end.split(':')[0] | int) * 60 + (pv_end.split(':')[1] | int) %}
   {% set offset_min = (now().utcoffset().total_seconds() / 60) | int %}
   {% set midnight_utc_min = (24 * 60 - offset_min) % (24 * 60) %}
-  {% if ende_min <= now_min < midnight_utc_min %}
+  {% if end_min <= now_min < midnight_utc_min %}
     0.0
   {% else %}
-    {% set f_avg = data[0].f_avg_heute_rest | float(default=50.0) %}
+    {% set f_avg = data[0].f_avg_today_remaining | float(default=50.0) %}
     {% set current_month = now().month %}
     {% set doy = now().strftime('%j') | int(default=1) %}
     {% set lat_rad = latitude * pi / 180 %}
@@ -136,16 +136,16 @@ DEFAULT_VALUE_TEMPLATE_MIN = """{# PV-PROGNOSE MINIMUM: Pessimistischer Tagesres
     {% set sun_today = 0.65 + 0.35 * cos((doy - 172) * 2 * pi / 365) %}
     {% set ns_pool = namespace(items=[]) %}
     {% for item in data %}
-      {% set dt_item = as_datetime(item.datum) %}
+      {% set dt_item = as_datetime(item.date) %}
       {% if dt_item is not none %}
         {% set item_day = dt_item.strftime('%j') | int(default=1) %}
         {% set decl_i = -0.4093 * cos(2 * pi * (item_day + 10) / 365) %}
         {% set dl_item = 24 / pi * acos([[(-tan(lat_rad) * tan(decl_i)), -1.0] | max, 1.0] | min) %}
         {% set sun_item = 0.65 + 0.35 * cos((item_day - 172) * 2 * pi / 365) %}
         {% set s_korr = (sun_today / sun_item) * (dl_today / dl_item) %}
-        {% set yield_korr = item.ertrag_tag_rest | float(default=0) * s_korr %}
-        {% set diff = (item.h_avg_rest | float(default=0) - f_avg) | abs %}
-        {% set ns_pool.items = ns_pool.items + [{'diff': diff, 'h_avg': item.h_avg_rest | float(0), 'y_korr': yield_korr}] %}
+        {% set yield_korr = item.yield_day_remaining | float(default=0) * s_korr %}
+        {% set diff = (item.h_avg_remaining | float(default=0) - f_avg) | abs %}
+        {% set ns_pool.items = ns_pool.items + [{'diff': diff, 'h_avg': item.h_avg_remaining | float(0), 'y_korr': yield_korr}] %}
       {% endif %}
     {% endfor %}
     {% set top5 = (ns_pool.items | sort(attribute='diff'))[:5] %}
@@ -173,14 +173,14 @@ DEFAULT_VALUE_TEMPLATE_MAX = """{# PV-PROGNOSE MAXIMUM: Optimistischer Tagesrest
 {% if raw and raw != '[]' and raw is not none %}
   {% set data = raw | from_json %}
   {% set now_min = utcnow().hour * 60 + utcnow().minute %}
-  {% set pv_ende = data[0].pv_ende | default('17:00') %}
-  {% set ende_min = (pv_ende.split(':')[0] | int) * 60 + (pv_ende.split(':')[1] | int) %}
+  {% set pv_end = data[0].pv_end | default('17:00') %}
+  {% set end_min = (pv_end.split(':')[0] | int) * 60 + (pv_end.split(':')[1] | int) %}
   {% set offset_min = (now().utcoffset().total_seconds() / 60) | int %}
   {% set midnight_utc_min = (24 * 60 - offset_min) % (24 * 60) %}
-  {% if ende_min <= now_min < midnight_utc_min %}
+  {% if end_min <= now_min < midnight_utc_min %}
     0.0
   {% else %}
-    {% set f_avg = data[0].f_avg_heute_rest | float(default=50.0) %}
+    {% set f_avg = data[0].f_avg_today_remaining | float(default=50.0) %}
     {% set doy = now().strftime('%j') | int(default=1) %}
     {% set lat_rad = latitude * pi / 180 %}
     {% set decl = -0.4093 * cos(2 * pi * (doy + 10) / 365) %}
@@ -188,15 +188,15 @@ DEFAULT_VALUE_TEMPLATE_MAX = """{# PV-PROGNOSE MAXIMUM: Optimistischer Tagesrest
     {% set sun_today = 0.65 + 0.35 * cos((doy - 172) * 2 * pi / 365) %}
     {% set ns_pool = namespace(items=[]) %}
     {% for item in data %}
-      {% set dt_item = as_datetime(item.datum) %}
+      {% set dt_item = as_datetime(item.date) %}
       {% if dt_item is not none %}
         {% set item_day = dt_item.strftime('%j') | int(default=1) %}
         {% set decl_i = -0.4093 * cos(2 * pi * (item_day + 10) / 365) %}
         {% set dl_item = 24 / pi * acos([[(-tan(lat_rad) * tan(decl_i)), -1.0] | max, 1.0] | min) %}
         {% set sun_item = 0.65 + 0.35 * cos((item_day - 172) * 2 * pi / 365) %}
         {% set s_korr = (sun_today / sun_item) * (dl_today / dl_item) %}
-        {% set yield_korr = item.ertrag_tag_rest | float(default=0) * s_korr %}
-        {% set diff = (item.h_avg_rest | float(default=0) - f_avg) | abs %}
+        {% set yield_korr = item.yield_day_remaining | float(default=0) * s_korr %}
+        {% set diff = (item.h_avg_remaining | float(default=0) - f_avg) | abs %}
         {% set ns_pool.items = ns_pool.items + [{'diff': diff, 'y_korr': yield_korr}] %}
       {% endif %}
     {% endfor %}
@@ -208,32 +208,32 @@ DEFAULT_VALUE_TEMPLATE_MAX = """{# PV-PROGNOSE MAXIMUM: Optimistischer Tagesrest
   0.0
 {% endif %}"""
 
-DEFAULT_VALUE_TEMPLATE_TOMORROW = """{# PV-PROGNOSE MORGEN: Gesamtertrag morgen, gewichteter Mittelwert ähnlicher Tage #}
+DEFAULT_VALUE_TEMPLATE_TOMORROW = """{# PV FORECAST TOMORROW: Total yield tomorrow, weighted average of similar days #}
 {% set raw = value %}
 {% if raw and raw != '[]' and raw is not none %}
   {% set data = raw | from_json %}
-  {# f_avg_morgen aus SQL: korrekt in UTC über pv_start/pv_ende berechnet #}
-  {% set f_avg_morgen = data[0].f_avg_morgen | float(default=50.0) %}
+  {# f_avg_tomorrow from SQL: calculated correctly in UTC via pv_start/pv_end #}
+  {% set f_avg_tomorrow = data[0].f_avg_tomorrow | float(default=50.0) %}
 
-  {# ASTRONOMISCHE BASISDATEN MORGEN (ortsgenau via Breitengrad) #}
-  {% set doy_m = (now() + timedelta(days=1)).strftime('%j') | int(default=1) %}
+  {# ASTRONOMICAL BASE DATA FOR TOMORROW (location-specific via latitude) #}
+  {% set doy_tomorrow = (now() + timedelta(days=1)).strftime('%j') | int(default=1) %}
   {% set lat_rad = latitude * pi / 180 %}
-  {% set decl_m = -0.4093 * cos(2 * pi * (doy_m + 10) / 365) %}
-  {% set dl_morgen = 24 / pi * acos([[(-tan(lat_rad) * tan(decl_m)), -1.0] | max, 1.0] | min) %}
-  {% set sun_morgen = 0.65 + 0.35 * cos((doy_m - 172) * 2 * pi / 365) %}
+  {% set decl_tomorrow = -0.4093 * cos(2 * pi * (doy_tomorrow + 10) / 365) %}
+  {% set dl_tomorrow = 24 / pi * acos([[(-tan(lat_rad) * tan(decl_tomorrow)), -1.0] | max, 1.0] | min) %}
+  {% set sun_tomorrow = 0.65 + 0.35 * cos((doy_tomorrow - 172) * 2 * pi / 365) %}
 
   {% set ns_pool = namespace(items=[], total_w=0) %}
   {% for item in data %}
-    {% set yield_total = item.ertrag_tag_gesamt | float(default=0) %}
-    {% set clouds_hist = item.h_avg_gesamt | float(default=0) %}
-    {% set dt_item = as_datetime(item.datum) %}
+    {% set yield_total = item.yield_day_total | float(default=0) %}
+    {% set clouds_hist = item.h_avg_total | float(default=0) %}
+    {% set dt_item = as_datetime(item.date) %}
     {% if dt_item is not none %}
       {% set item_day = dt_item.strftime('%j') | int(default=1) %}
       {% set decl_i = -0.4093 * cos(2 * pi * (item_day + 10) / 365) %}
       {% set dl_item = 24 / pi * acos([[(-tan(lat_rad) * tan(decl_i)), -1.0] | max, 1.0] | min) %}
       {% set sun_item = 0.65 + 0.35 * cos((item_day - 172) * 2 * pi / 365) %}
-      {% set s_korr = (sun_morgen / sun_item) * (dl_morgen / dl_item) %}
-      {% set diff = (clouds_hist - f_avg_morgen) | abs %}
+      {% set s_korr = (sun_tomorrow / sun_item) * (dl_tomorrow / dl_item) %}
+      {% set diff = (clouds_hist - f_avg_tomorrow) | abs %}
       {% set w = 1 / ([diff, 0.5] | max) %}
       {% set ns_pool.total_w = ns_pool.total_w + w %}
       {% set ns_pool.items = ns_pool.items + [{'y_korr': yield_total * s_korr, 'h_avg': clouds_hist, 'w': w}] %}
@@ -241,13 +241,13 @@ DEFAULT_VALUE_TEMPLATE_TOMORROW = """{# PV-PROGNOSE MORGEN: Gesamtertrag morgen,
   {% endfor %}
 
   {% set pool = ns_pool.items %}
-  {% set brighter = pool | selectattr('h_avg', 'lt', f_avg_morgen) | list %}
-  {% set darker = pool | selectattr('h_avg', 'gt', f_avg_morgen) | list %}
+  {% set brighter = pool | selectattr('h_avg', 'lt', f_avg_tomorrow) | list %}
+  {% set darker = pool | selectattr('h_avg', 'gt', f_avg_tomorrow) | list %}
   {% set res = 0 %}
   {% if brighter | count > 0 and darker | count == 0 %}
     {% set worst_day = brighter | sort(attribute='y_korr') | first %}
-    {% set res = worst_day.y_korr * ([120 - f_avg_morgen, 5.0] | max / [120 - worst_day.h_avg, 5.0] | max) %}
-  {% elif darker | count > 0 and pool | selectattr('h_avg', 'le', f_avg_morgen) | list | count == 0 %}
+    {% set res = worst_day.y_korr * ([120 - f_avg_tomorrow, 5.0] | max / [120 - worst_day.h_avg, 5.0] | max) %}
+  {% elif darker | count > 0 and pool | selectattr('h_avg', 'le', f_avg_tomorrow) | list | count == 0 %}
     {% set res = darker | map(attribute='y_korr') | max %}
   {% elif pool | count > 0 %}
     {% set ns_mix = namespace(ws=0) %}
@@ -348,7 +348,7 @@ forecast_next_day AS (
           AND s.last_updated_ts = (SELECT MAX(last_updated_ts) FROM states WHERE metadata_id = (SELECT f_id FROM ids)) 
           AND substr(json_extract(f.value, '$.datetime'), 1, 10) = date('now', (SELECT offset FROM vars), '+1 day') 
           AND substr(json_extract(f.value, '$.datetime'), 12, 5) BETWEEN (SELECT sun_start FROM pv_activity) AND (SELECT sun_end FROM pv_activity)
-    ), 50.0) as f_avg_morgen
+    ), 50.0) as f_avg_tomorrow
 ),
 
 cloud_history AS (
@@ -412,15 +412,17 @@ final_data AS (
 
 SELECT COALESCE(json_group_array(
     json_object(
-        'datum', day,
-        'f_avg_heute_rest', (SELECT ROUND(f_avg, 1) FROM forecast_val),        
-        'f_avg_morgen', (SELECT ROUND(f_avg_morgen, 1) FROM forecast_next_day),
-        'h_avg_gesamt', ROUND(h_avg_total_val, 1),
-        'h_avg_rest', ROUND(h_avg_rest_val, 1),
-        'ertrag_tag_gesamt', ROUND((day_max - day_min) / (SELECT pv_divisor FROM vars), 2),
-        'ertrag_tag_rest', ROUND(CASE 
-            WHEN NOT (strftime('%H:%M', 'now') BETWEEN (SELECT sun_start FROM pv_activity) AND (SELECT sun_end FROM pv_activity))
+        'date', day,
+        'f_avg_today_remaining', (SELECT ROUND(f_avg, 1) FROM forecast_val),        
+        'f_avg_tomorrow', (SELECT ROUND(f_avg_tomorrow, 1) FROM forecast_next_day),
+        'h_avg_total', ROUND(h_avg_total_val, 1),
+        'h_avg_remaining', ROUND(h_avg_rest_val, 1),
+        'yield_day_total', ROUND((day_max - day_min) / (SELECT pv_divisor FROM vars), 2),
+        'yield_day_remaining', ROUND(CASE 
+            WHEN strftime('%H:%M', 'now') > (SELECT sun_end FROM pv_activity)
                 THEN 0.0
+            WHEN strftime('%H:%M', 'now') < (SELECT sun_start FROM pv_activity)
+                THEN (day_max - day_min) / (SELECT pv_divisor FROM vars)
             ELSE MAX(0, 
                 ((h_hour_curr - h_hour_prev) * (1.0 - (CAST(strftime('%M', 'now') AS FLOAT) / 60.0)) * 
                   CASE 
@@ -432,7 +434,7 @@ SELECT COALESCE(json_group_array(
             ) / (SELECT pv_divisor FROM vars)
         END, 2),
         'pv_start', (SELECT sun_start FROM pv_activity),
-        'pv_ende', (SELECT sun_end FROM pv_activity)
+        'pv_end', (SELECT sun_end FROM pv_activity)
     )
 ), '[]') as json 
 FROM final_data 
@@ -447,23 +449,23 @@ DEFAULT_LOVELACE_TEMPLATE = """{# ==============================================
   {% set data = raw_json | from_json %}
 
   {% if data | length > 0 %}
-    {% set f_avg = data[0].f_avg_heute_rest | float(default=50.0) %}
+    {% set f_avg = data[0].f_avg_today_remaining | float(default=50.0) %}
 
-    {# 1. SAISONALE SCHNEE-ERKENNUNG (Dez / Jan / Feb) #}
+    {# 1. SEASONAL SNOW DETECTION (Dec / Jan / Feb) #}
     {% set current_month = now().month %}
-    {% set schnee_faktor_heute = 1.0 %}
+    {% set snow_factor_today = 1.0 %}
     {% if current_month in [12, 1, 2] %}
-      {% set gestern_datum = (now() - timedelta(days=1)).strftime('%Y-%m-%d') %}
-      {% set gestern_data = data | selectattr('datum', 'equalto', gestern_datum) | list | first %}
-      {% if gestern_data is defined %}
-        {% set y_rest_gestern = gestern_data.ertrag_tag_rest | float(default=0) %}
-        {% set h_rest_gestern = gestern_data.h_avg_rest | float(default=0) %}
-        {% set perf_gestern = y_rest_gestern / ([105 - h_rest_gestern, 5] | max) %}
-        {% if perf_gestern < 0.02 %}{% set schnee_faktor_heute = 0.1 %}{% endif %}
+      {% set yesterday_date = (now() - timedelta(days=1)).strftime('%Y-%m-%d') %}
+      {% set yesterday_data = data | selectattr('date', 'equalto', yesterday_date) | list | first %}
+      {% if yesterday_data is defined %}
+        {% set yesterday_yield = yesterday_data.yield_day_remaining | float(default=0) %}
+        {% set yesterday_h_avg = yesterday_data.h_avg_remaining | float(default=0) %}
+        {% set yesterday_perf = yesterday_yield / ([105 - yesterday_h_avg, 5] | max) %}
+        {% if yesterday_perf < 0.02 %}{% set snow_factor_today = 0.1 %}{% endif %}
       {% endif %}
     {% endif %}
 
-    {# 2. ASTRONOMISCHE BASISDATEN (Breitengrad aus zone.home) #}
+    {# 2. ASTRONOMICAL BASE DATA (latitude from zone.home) #}
     {% set latitude = state_attr('zone.home', 'latitude') | float(48.0) %}
     {% set doy = now().strftime('%j') | int(default=1) %}
     {% set lat_rad = latitude * pi / 180 %}
@@ -472,13 +474,13 @@ DEFAULT_LOVELACE_TEMPLATE = """{# ==============================================
     {% set dl_today = 24 / pi * acos([[cos_ha, -1.0] | max, 1.0] | min) %}
     {% set sun_today = 0.65 + 0.35 * cos((doy - 172) * 2 * pi / 365) %}
 
-    {# 3. POOL AUFBAUEN #}
+    {# 3. BUILD DATA POOL #}
     {% set ns_pool = namespace(items=[], total_w=0) %}
     {% for item in data %}
-      {% set yield_raw = item.ertrag_tag_rest | float(default=0) %}
-      {% set clouds = item.h_avg_rest | float(default=0) %}
-      {% set clouds_gesamt = item.h_avg_gesamt | float(default=0) %}
-      {% set item_dt = as_datetime(item.datum) %}
+      {% set yield_raw = item.yield_day_remaining | float(default=0) %}
+      {% set clouds = item.h_avg_remaining | float(default=0) %}
+      {% set clouds_total = item.h_avg_total | float(default=0) %}
+      {% set item_dt = as_datetime(item.date) %}
       {% if item_dt is not none %}
         {% set item_day = item_dt.strftime('%j') | int(default=1) %}
         {% set decl_i = -0.4093 * cos(2 * pi * (item_day + 10) / 365) %}
@@ -490,9 +492,9 @@ DEFAULT_LOVELACE_TEMPLATE = """{# ==============================================
         {% set w = 1 / ([diff, 0.5] | max) %}
         {% if yield_raw > 0.05 or clouds > 95 or current_month in [12, 1, 2] %}
           {% set ns_pool.total_w = ns_pool.total_w + w %}
-          {% set ns_pool.items = ns_pool.items + [{'datum': item.datum, 'h_avg': clouds, 'h_avg_gesamt': clouds_gesamt, 'y_korr': yield_raw * s_korr, 's_fakt': s_korr, 'w': w, 'ertrag_tag_gesamt': item.ertrag_tag_gesamt, 'filtered': false}] %}
+          {% set ns_pool.items = ns_pool.items + [{'date': item.date, 'h_avg': clouds, 'h_avg_total': clouds_total, 'y_korr': yield_raw * s_korr, 's_fakt': s_korr, 'w': w, 'yield_day_total': item.yield_day_total, 'filtered': false}] %}
         {% else %}
-          {% set ns_pool.items = ns_pool.items + [{'datum': item.datum, 'h_avg': clouds, 'h_avg_gesamt': clouds_gesamt, 'y_korr': yield_raw * s_korr, 's_fakt': s_korr, 'w': 0, 'ertrag_tag_gesamt': item.ertrag_tag_gesamt, 'filtered': true}] %}
+          {% set ns_pool.items = ns_pool.items + [{'date': item.date, 'h_avg': clouds, 'h_avg_total': clouds_total, 'y_korr': yield_raw * s_korr, 's_fakt': s_korr, 'w': 0, 'yield_day_total': item.yield_day_total, 'filtered': true}] %}
         {% endif %}
       {% endif %}
     {% endfor %}
@@ -501,18 +503,18 @@ DEFAULT_LOVELACE_TEMPLATE = """{# ==============================================
     {% set brighter = pool | selectattr('h_avg', 'lt', f_avg) | list %}
     {% set darker = pool | selectattr('h_avg', 'gt', f_avg) | list %}
     {% set res = 0 %}
-    {% set methode = "No data" %}
+    {% set method = "No data" %}
 
     {# 4. Decision logic #}
     {% if brighter | count > 0 and darker | count == 0 %}
-      {% set methode = "Light reduction" %}
+      {% set method = "Light reduction" %}
       {% set worst_day = brighter | sort(attribute='y_korr') | first %}
       {% set res = worst_day.y_korr * ([120 - f_avg, 5.0] | max / [120 - worst_day.h_avg, 5.0] | max) %}
     {% elif darker | count > 0 and pool | selectattr('h_avg', 'le', f_avg) | list | count == 0 %}
-      {% set methode = "Max assumption" %}
+      {% set method = "Max assumption" %}
       {% set res = darker | map(attribute='y_korr') | max %}
     {% elif pool | count > 0 %}
-      {% set methode = "Weighted average" %}
+      {% set method = "Weighted average" %}
       {% set ns_mix = namespace(ws=0) %}
       {% for item in pool %}
         {% set ns_mix.ws = ns_mix.ws + (item.y_korr * item.w) %}
@@ -521,17 +523,17 @@ DEFAULT_LOVELACE_TEMPLATE = """{# ==============================================
     {% endif %}
 
     {% set scale = 1000 if res > 200 else 1 %}
-    {% set final_val = (res / scale) * schnee_faktor_heute %}
+    {% set final_val = (res / scale) * snow_factor_today %}
 
 **Forecast:**
 ## {{ final_val | round(2) }} kWh
-*Basis: **{{ f_avg }}%** clouds | **{{ methode }}***
-{% if schnee_faktor_heute < 1.0 %}⚠️ **Snow suspected! ({{ (schnee_faktor_heute * 100) | round(0) }}%)**{% endif %}
+*Basis: **{{ f_avg }}%** clouds | **{{ method }}***
+{% if snow_factor_today < 1.0 %}⚠️ **Snow suspected! ({{ (snow_factor_today * 100) | round(0) }}%)**{% endif %}
 
 | Date | Day clouds | Day yield | Rem. clouds | Rem. yield | Weight |
 | :--- | :---: | :---: | :---: | :---: | :---: |
 {%- for item in ns_pool.items | sort(attribute='w', reverse=True) %}
-| {{ item.datum }} | {{ item.h_avg_gesamt }}% | {{ item.ertrag_tag_gesamt }} | **{{ item.h_avg }}%** | **{{ ((item.y_korr * schnee_faktor_heute) / scale) | round(2) }} <small><small>({{ item.s_fakt | round(2) }}x)</small></small>**{% if item.filtered %}❌{% endif %} | {{ (((item.w / ns_pool.total_w) * 100) if ns_pool.total_w > 0 else 0) | round(1) }}% |
+| {{ item.date }} | {{ item.h_avg_total }}% | {{ item.yield_day_total }} | **{{ item.h_avg }}%** | **{{ ((item.y_korr * snow_factor_today) / scale) | round(2) }} <small><small>({{ item.s_fakt | round(2) }}x)</small></small>**{% if item.filtered %}❌{% endif %} | {{ (((item.w / ns_pool.total_w) * 100) if ns_pool.total_w > 0 else 0) | round(1) }}% |
 {%- endfor %}
 
   {% else %}

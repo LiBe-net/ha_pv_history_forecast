@@ -13,23 +13,23 @@
   {% set data = raw_json | from_json %}
 
   {% if data | length > 0 %}
-    {% set f_avg = data[0].f_avg_heute_rest | float(default=50.0) %}
+    {% set f_avg = data[0].f_avg_today_remaining | float(default=50.0) %}
 
-    {# 1. SAISONALE SCHNEE-ERKENNUNG (Dez / Jan / Feb) #}
+    {# 1. SEASONAL SNOW DETECTION (Dec / Jan / Feb) #}
     {% set current_month = now().month %}
-    {% set schnee_faktor_heute = 1.0 %}
+    {% set snow_factor_today = 1.0 %}
     {% if current_month in [12, 1, 2] %}
-      {% set gestern_datum = (now() - timedelta(days=1)).strftime('%Y-%m-%d') %}
-      {% set gestern_data = data | selectattr('datum', 'equalto', gestern_datum) | list | first %}
-      {% if gestern_data is defined %}
-        {% set y_rest_gestern = gestern_data.ertrag_tag_rest | float(default=0) %}
-        {% set h_rest_gestern = gestern_data.h_avg_rest | float(default=0) %}
-        {% set perf_gestern = y_rest_gestern / ([105 - h_rest_gestern, 5] | max) %}
-        {% if perf_gestern < 0.02 %}{% set schnee_faktor_heute = 0.1 %}{% endif %}
+      {% set yesterday_date = (now() - timedelta(days=1)).strftime('%Y-%m-%d') %}
+      {% set yesterday_data = data | selectattr('date', 'equalto', yesterday_date) | list | first %}
+      {% if yesterday_data is defined %}
+        {% set yesterday_yield = yesterday_data.yield_day_remaining | float(default=0) %}
+        {% set yesterday_h_avg = yesterday_data.h_avg_remaining | float(default=0) %}
+        {% set yesterday_perf = yesterday_yield / ([105 - yesterday_h_avg, 5] | max) %}
+        {% if yesterday_perf < 0.02 %}{% set snow_factor_today = 0.1 %}{% endif %}
       {% endif %}
     {% endif %}
 
-    {# 2. ASTRONOMISCHE BASISDATEN (Breitengrad aus zone.home) #}
+    {# 2. ASTRONOMICAL BASE DATA (latitude from zone.home) #}
     {% set latitude = state_attr('zone.home', 'latitude') | float(48.0) %}
     {% set doy = now().strftime('%j') | int(default=1) %}
     {% set lat_rad = latitude * pi / 180 %}
@@ -38,13 +38,13 @@
     {% set dl_today = 24 / pi * acos([[cos_ha, -1.0] | max, 1.0] | min) %}
     {% set sun_today = 0.65 + 0.35 * cos((doy - 172) * 2 * pi / 365) %}
 
-    {# 3. POOL AUFBAUEN #}
+    {# 3. BUILD DATA POOL #}
     {% set ns_pool = namespace(items=[], total_w=0) %}
     {% for item in data %}
-      {% set yield_raw = item.ertrag_tag_rest | float(default=0) %}
-      {% set clouds = item.h_avg_rest | float(default=0) %}
-      {% set clouds_gesamt = item.h_avg_gesamt | float(default=0) %}
-      {% set item_dt = as_datetime(item.datum) %}
+      {% set yield_raw = item.yield_day_remaining | float(default=0) %}
+      {% set clouds = item.h_avg_remaining | float(default=0) %}
+      {% set clouds_total = item.h_avg_total | float(default=0) %}
+      {% set item_dt = as_datetime(item.date) %}
       {% if item_dt is not none %}
         {% set item_day = item_dt.strftime('%j') | int(default=1) %}
         {% set decl_i = -0.4093 * cos(2 * pi * (item_day + 10) / 365) %}
@@ -56,9 +56,9 @@
         {% set w = 1 / ([diff, 0.5] | max) %}
         {% if yield_raw > 0.05 or clouds > 95 or current_month in [12, 1, 2] %}
           {% set ns_pool.total_w = ns_pool.total_w + w %}
-          {% set ns_pool.items = ns_pool.items + [{'datum': item.datum, 'h_avg': clouds, 'h_avg_gesamt': clouds_gesamt, 'y_korr': yield_raw * s_korr, 's_fakt': s_korr, 'w': w, 'ertrag_tag_gesamt': item.ertrag_tag_gesamt, 'filtered': false}] %}
+          {% set ns_pool.items = ns_pool.items + [{'date': item.date, 'h_avg': clouds, 'h_avg_total': clouds_total, 'y_korr': yield_raw * s_korr, 's_fakt': s_korr, 'w': w, 'yield_day_total': item.yield_day_total, 'filtered': false}] %}
         {% else %}
-          {% set ns_pool.items = ns_pool.items + [{'datum': item.datum, 'h_avg': clouds, 'h_avg_gesamt': clouds_gesamt, 'y_korr': yield_raw * s_korr, 's_fakt': s_korr, 'w': 0, 'ertrag_tag_gesamt': item.ertrag_tag_gesamt, 'filtered': true}] %}
+          {% set ns_pool.items = ns_pool.items + [{'date': item.date, 'h_avg': clouds, 'h_avg_total': clouds_total, 'y_korr': yield_raw * s_korr, 's_fakt': s_korr, 'w': 0, 'yield_day_total': item.yield_day_total, 'filtered': true}] %}
         {% endif %}
       {% endif %}
     {% endfor %}
@@ -67,18 +67,18 @@
     {% set brighter = pool | selectattr('h_avg', 'lt', f_avg) | list %}
     {% set darker = pool | selectattr('h_avg', 'gt', f_avg) | list %}
     {% set res = 0 %}
-    {% set methode = "No data" %}
+    {% set method = "No data" %}
 
     {# 4. Decision logic #}
     {% if brighter | count > 0 and darker | count == 0 %}
-      {% set methode = "Light reduction" %}
+      {% set method = "Light reduction" %}
       {% set worst_day = brighter | sort(attribute='y_korr') | first %}
       {% set res = worst_day.y_korr * ([120 - f_avg, 5.0] | max / [120 - worst_day.h_avg, 5.0] | max) %}
     {% elif darker | count > 0 and pool | selectattr('h_avg', 'le', f_avg) | list | count == 0 %}
-      {% set methode = "Max assumption" %}
+      {% set method = "Max assumption" %}
       {% set res = darker | map(attribute='y_korr') | max %}
     {% elif pool | count > 0 %}
-      {% set methode = "Weighted average" %}
+      {% set method = "Weighted average" %}
       {% set ns_mix = namespace(ws=0) %}
       {% for item in pool %}
         {% set ns_mix.ws = ns_mix.ws + (item.y_korr * item.w) %}
@@ -87,17 +87,17 @@
     {% endif %}
 
     {% set scale = 1000 if res > 200 else 1 %}
-    {% set final_val = (res / scale) * schnee_faktor_heute %}
+    {% set final_val = (res / scale) * snow_factor_today %}
 
 **Forecast:**
 ## {{ final_val | round(2) }} kWh
-*Basis: **{{ f_avg }}%** clouds | **{{ methode }}***
-{% if schnee_faktor_heute < 1.0 %}⚠️ **Snow suspected! ({{ (schnee_faktor_heute * 100) | round(0) }}%)**{% endif %}
+*Basis: **{{ f_avg }}%** clouds | **{{ method }}***
+{% if snow_factor_today < 1.0 %}⚠️ **Snow suspected! ({{ (snow_factor_today * 100) | round(0) }}%)**{% endif %}
 
 | Date | Day clouds | Day yield | Rem. clouds | Rem. yield | Weight |
 | :--- | :---: | :---: | :---: | :---: | :---: |
 {%- for item in ns_pool.items | sort(attribute='w', reverse=True) %}
-| {{ item.datum }} | {{ item.h_avg_gesamt }}% | {{ item.ertrag_tag_gesamt }} | **{{ item.h_avg }}%** | **{{ ((item.y_korr * schnee_faktor_heute) / scale) | round(2) }} <small><small>({{ item.s_fakt | round(2) }}x)</small></small>**{% if item.filtered %}❌{% endif %} | {{ (((item.w / ns_pool.total_w) * 100) if ns_pool.total_w > 0 else 0) | round(1) }}% |
+| {{ item.date }} | {{ item.h_avg_total }}% | {{ item.yield_day_total }} | **{{ item.h_avg }}%** | **{{ ((item.y_korr * snow_factor_today) / scale) | round(2) }} <small><small>({{ item.s_fakt | round(2) }}x)</small></small>**{% if item.filtered %}❌{% endif %} | {{ (((item.w / ns_pool.total_w) * 100) if ns_pool.total_w > 0 else 0) | round(1) }}% |
 {%- endfor %}
 
   {% else %}
