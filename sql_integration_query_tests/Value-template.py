@@ -5,16 +5,19 @@
 {% if raw and raw != '[]' and raw is not none %}
   {% set data = raw | from_json %}
 
-  {# --- 0. NIGHT-CHECK (UTC-correct: pv_end is UTC time from SQL) ---
-     Window [pv_end .. local midnight in UTC) → yield 0.
-     UTC after local midnight (e.g. 23:30 UTC = 00:30 CET) = new day, no production yet. #}
+  {# --- 0. NIGHT-CHECK (UTC-correct: pv_end and pv_start are UTC times from SQL) ---
+     Evening window [pv_end .. local midnight in UTC) → yield 0.
+     Morning window [UTC midnight .. pv_start) → yield 0.
+     (e.g. 00:00 UTC = 01:00 CET: before sunrise → 0) #}
   {% set now_min = utcnow().hour * 60 + utcnow().minute %}
   {% set pv_end = data[0].pv_end | default('17:00') %}
+  {% set pv_start = data[0].pv_start | default('05:30') %}
   {% set end_min = (pv_end.split(':')[0] | int) * 60 + (pv_end.split(':')[1] | int) %}
+  {% set start_min = (pv_start.split(':')[0] | int) * 60 + (pv_start.split(':')[1] | int) %}
   {% set offset_min = (now().utcoffset().total_seconds() / 60) | int %}
   {% set midnight_utc_min = (24 * 60 - offset_min) % (24 * 60) %}
 
-  {% if end_min <= now_min < midnight_utc_min %}
+  {% if (end_min <= now_min < midnight_utc_min) or now_min < start_min %}
     0.0
   {% else %}
 
@@ -73,11 +76,11 @@
 
     {# --- 5. FORECAST CALCULATION --- #}
     {% set pool = ns_pool.items %}
-    {% set brighter = pool | selectattr('h_avg', 'lt', f_avg) | list %}
+    {% set brighter = pool | selectattr('h_avg', 'le', f_avg) | list %}
     {% set darker = pool | selectattr('h_avg', 'gt', f_avg) | list %}
     {% set res = 0 %}
 
-    {% if brighter | count > 0 and (pool | selectattr('h_avg', 'ge', f_avg) | list | count == 0) %}
+    {% if brighter | count > 0 and darker | count == 0 %}
       {% set worst_day = brighter | sort(attribute='y_korr') | first %}
       {% set res = worst_day.y_korr * ([120 - f_avg, 5.0] | max / [120 - worst_day.h_avg, 5.0] | max) %}
     {% elif darker | count > 0 and pool | selectattr('h_avg', 'le', f_avg) | list | count == 0 %}

@@ -26,16 +26,19 @@ DEFAULT_VALUE_TEMPLATE = """{# PV FORECAST: Remaining yield today, weighted aver
 {% if raw and raw != '[]' and raw is not none %}
   {% set data = raw | from_json %}
 
-  {# --- 0. NIGHT-CHECK (UTC-correct: pv_end is UTC time from SQL) ---
-     Window [pv_end .. local midnight in UTC) → yield 0.
-     UTC after local midnight (e.g. 23:30 UTC = 00:30 CET) = new day, no production yet. #}
+  {# --- 0. NIGHT-CHECK (UTC-correct: pv_end and pv_start are UTC times from SQL) ---
+     Evening window [pv_end .. local midnight in UTC) → yield 0.
+     Morning window [UTC midnight .. pv_start) → yield 0.
+     (e.g. 00:00 UTC = 01:00 CET: before sunrise → 0) #}
   {% set now_min = utcnow().hour * 60 + utcnow().minute %}
   {% set pv_end = data[0].pv_end | default('17:00') %}
+  {% set pv_start = data[0].pv_start | default('05:30') %}
   {% set end_min = (pv_end.split(':')[0] | int) * 60 + (pv_end.split(':')[1] | int) %}
+  {% set start_min = (pv_start.split(':')[0] | int) * 60 + (pv_start.split(':')[1] | int) %}
   {% set offset_min = (now().utcoffset().total_seconds() / 60) | int %}
   {% set midnight_utc_min = (24 * 60 - offset_min) % (24 * 60) %}
 
-  {% if end_min <= now_min < midnight_utc_min %}
+  {% if (end_min <= now_min < midnight_utc_min) or now_min < start_min %}
     0.0
   {% else %}
 
@@ -121,10 +124,12 @@ DEFAULT_VALUE_TEMPLATE_MIN = """{# PV-PROGNOSE MINIMUM: Pessimistischer Tagesres
   {% set data = raw | from_json %}
   {% set now_min = utcnow().hour * 60 + utcnow().minute %}
   {% set pv_end = data[0].pv_end | default('17:00') %}
+  {% set pv_start = data[0].pv_start | default('05:30') %}
   {% set end_min = (pv_end.split(':')[0] | int) * 60 + (pv_end.split(':')[1] | int) %}
+  {% set start_min = (pv_start.split(':')[0] | int) * 60 + (pv_start.split(':')[1] | int) %}
   {% set offset_min = (now().utcoffset().total_seconds() / 60) | int %}
   {% set midnight_utc_min = (24 * 60 - offset_min) % (24 * 60) %}
-  {% if end_min <= now_min < midnight_utc_min %}
+  {% if (end_min <= now_min < midnight_utc_min) or now_min < start_min %}
     0.0
   {% else %}
     {% set f_avg = data[0].f_avg_today_remaining | float(default=50.0) %}
@@ -174,10 +179,12 @@ DEFAULT_VALUE_TEMPLATE_MAX = """{# PV-PROGNOSE MAXIMUM: Optimistischer Tagesrest
   {% set data = raw | from_json %}
   {% set now_min = utcnow().hour * 60 + utcnow().minute %}
   {% set pv_end = data[0].pv_end | default('17:00') %}
+  {% set pv_start = data[0].pv_start | default('05:30') %}
   {% set end_min = (pv_end.split(':')[0] | int) * 60 + (pv_end.split(':')[1] | int) %}
+  {% set start_min = (pv_start.split(':')[0] | int) * 60 + (pv_start.split(':')[1] | int) %}
   {% set offset_min = (now().utcoffset().total_seconds() / 60) | int %}
   {% set midnight_utc_min = (24 * 60 - offset_min) % (24 * 60) %}
-  {% if end_min <= now_min < midnight_utc_min %}
+  {% if (end_min <= now_min < midnight_utc_min) or now_min < start_min %}
     0.0
   {% else %}
     {% set f_avg = data[0].f_avg_today_remaining | float(default=50.0) %}
@@ -451,6 +458,16 @@ DEFAULT_LOVELACE_TEMPLATE = """{# ==============================================
   {% if data | length > 0 %}
     {% set f_avg = data[0].f_avg_today_remaining | float(default=50.0) %}
 
+    {# 0. NIGHT-CHECK (same logic as sensor templates) #}
+    {% set now_min = utcnow().hour * 60 + utcnow().minute %}
+    {% set pv_end = data[0].pv_end | default('17:30') %}
+    {% set pv_start = data[0].pv_start | default('05:30') %}
+    {% set end_min = (pv_end.split(':')[0] | int) * 60 + (pv_end.split(':')[1] | int) %}
+    {% set start_min = (pv_start.split(':')[0] | int) * 60 + (pv_start.split(':')[1] | int) %}
+    {% set offset_min = (now().utcoffset().total_seconds() / 60) | int %}
+    {% set midnight_utc_min = (24 * 60 - offset_min) % (24 * 60) %}
+    {% set is_night = (end_min <= now_min < midnight_utc_min) or now_min < start_min %}
+
     {# 1. SEASONAL SNOW DETECTION (Dec / Jan / Feb) #}
     {% set current_month = now().month %}
     {% set snow_factor_today = 1.0 %}
@@ -526,7 +543,7 @@ DEFAULT_LOVELACE_TEMPLATE = """{# ==============================================
     {% set final_val = (res / scale) * snow_factor_today %}
 
 **Forecast:**
-## {{ final_val | round(2) }} kWh
+## {{ (0.0 if is_night else final_val) | round(2) }} kWh
 *Basis: **{{ f_avg }}%** clouds | **{{ method }}***
 {% if snow_factor_today < 1.0 %}⚠️ **Snow suspected! ({{ (snow_factor_today * 100) | round(0) }}%)**{% endif %}
 

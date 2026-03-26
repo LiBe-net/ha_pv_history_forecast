@@ -20,36 +20,36 @@
   {# Compare tomorrow's forecast with total yields from history #}
   {% set ns_pool = namespace(items=[], total_w=0) %}
   {% for item in data %}
-    {% set yield_total = item.yield_day_total | float %}
-    {% set clouds_hist = item.h_avg_total | float %}
-    
-    {# Seasonal correction: scale historical yield to tomorrow's solar level #}
-    {% set item_day = as_datetime(item.date).strftime('%j') | int %}
-    {% set decl_i = -0.4093 * cos(2 * pi * (item_day + 10) / 365) %}
-    {% set dl_item = 24 / pi * acos([[(-tan(lat_rad) * tan(decl_i)), -1.0] | max, 1.0] | min) %}
-    {% set sun_item = 0.65 + 0.35 * cos((item_day - 172) * 2 * pi / 365) %}
-    {% set s_korr = (sun_tomorrow / sun_item) * (dl_tomorrow / dl_item) %}
-    
-    {# Weighting: the closer the cloud coverage, the stronger the weight #}
-    {% set diff = (clouds_hist - f_avg_tomorrow) | abs %}
-    {% set w = 1 / ([diff, 0.5] | max) %}
-    
-    {% set ns_pool.total_w = ns_pool.total_w + w %}
-    {% set ns_pool.items = ns_pool.items + [{'y_korr': yield_total * s_korr, 'h_avg': clouds_hist, 'w': w}] %}
+    {% set yield_total = item.yield_day_total | float(default=0) %}
+    {% set clouds_hist = item.h_avg_total | float(default=0) %}
+    {% set dt_item = as_datetime(item.date) %}
+    {% if dt_item is not none %}
+      {# Seasonal correction: scale historical yield to tomorrow's solar level #}
+      {% set item_day = dt_item.strftime('%j') | int(default=1) %}
+      {% set decl_i = -0.4093 * cos(2 * pi * (item_day + 10) / 365) %}
+      {% set dl_item = 24 / pi * acos([[(-tan(lat_rad) * tan(decl_i)), -1.0] | max, 1.0] | min) %}
+      {% set sun_item = 0.65 + 0.35 * cos((item_day - 172) * 2 * pi / 365) %}
+      {% set s_korr = (sun_tomorrow / sun_item) * (dl_tomorrow / dl_item) %}
+      {# Weighting: the closer the cloud coverage, the stronger the weight #}
+      {% set diff = (clouds_hist - f_avg_tomorrow) | abs %}
+      {% set w = 1 / ([diff, 0.5] | max) %}
+      {% set ns_pool.total_w = ns_pool.total_w + w %}
+      {% set ns_pool.items = ns_pool.items + [{'y_korr': yield_total * s_korr, 'h_avg': clouds_hist, 'w': w}] %}
+    {% endif %}
   {% endfor %}
 
-  {# --- 4. ENTSCHEIDUNGSLOGIK --- #}
+  {# --- 4. FORECAST CALCULATION --- #}
   {% set pool = ns_pool.items %}
-  {% set brighter = pool | selectattr('h_avg', 'lt', f_avg_tomorrow) | list %}
+  {% set brighter = pool | selectattr('h_avg', 'le', f_avg_tomorrow) | list %}
   {% set darker = pool | selectattr('h_avg', 'gt', f_avg_tomorrow) | list %}
   {% set res = 0 %}
 
-  {% if brighter | count > 0 and darker | count == 0 and f_avg_tomorrow < 100 %}
+  {% if brighter | count > 0 and darker | count == 0 %}
     {# Case A: tomorrow brighter than all pool days → light reduction based on worst day #}
     {% set worst_day = brighter | sort(attribute='y_korr') | first %}
     {% set res = worst_day.y_korr * ([120 - f_avg_tomorrow, 5.0] | max / [120 - worst_day.h_avg, 5.0] | max) %}
     
-  {% elif darker | count > 0 and brighter | count == 0 %}
+  {% elif darker | count > 0 and pool | selectattr('h_avg', 'le', f_avg_tomorrow) | list | count == 0 %}
     {# Case B: tomorrow darker than all pool days → cautious max assumption #}
     {% set res = darker | map(attribute='y_korr') | max %}
     
@@ -59,7 +59,7 @@
     {% for item in pool %}
       {% set ns_mix.ws = ns_mix.ws + (item.y_korr * item.w) %}
     {% endfor %}
-    {% set res = ns_mix.ws / ns_pool.total_w %}
+    {% set res = ns_mix.ws / (ns_pool.total_w if ns_pool.total_w > 0 else 1) %}
   {% endif %}
 
   {# Ergebnis-Ausgabe: Wh in kWh konvertieren falls Wert sehr hoch ist (Logik-Check) #}
@@ -67,6 +67,6 @@
   {{ (res / final_scale) | round(2) }}
 
 {% else %}
-  {# Fallback wenn SQL-Daten fehlen #}
+  {# Fallback SQL Data missing #}
   0.0
 {% endif %}

@@ -15,6 +15,16 @@
   {% if data | length > 0 %}
     {% set f_avg = data[0].f_avg_today_remaining | float(default=50.0) %}
 
+    {# 0. NIGHT-CHECK (same logic as sensor templates) #}
+    {% set now_min = utcnow().hour * 60 + utcnow().minute %}
+    {% set pv_end = data[0].pv_end | default('17:30') %}
+    {% set pv_start = data[0].pv_start | default('05:30') %}
+    {% set end_min = (pv_end.split(':')[0] | int) * 60 + (pv_end.split(':')[1] | int) %}
+    {% set start_min = (pv_start.split(':')[0] | int) * 60 + (pv_start.split(':')[1] | int) %}
+    {% set offset_min = (now().utcoffset().total_seconds() / 60) | int %}
+    {% set midnight_utc_min = (24 * 60 - offset_min) % (24 * 60) %}
+    {% set is_night = (end_min <= now_min < midnight_utc_min) or now_min < start_min %}
+
     {# 1. SEASONAL SNOW DETECTION (Dec / Jan / Feb) #}
     {% set current_month = now().month %}
     {% set snow_factor_today = 1.0 %}
@@ -64,13 +74,13 @@
     {% endfor %}
 
     {% set pool = ns_pool.items | selectattr('filtered', 'equalto', false) | list %}
-    {% set brighter = pool | selectattr('h_avg', 'lt', f_avg) | list %}
+    {% set brighter = pool | selectattr('h_avg', 'le', f_avg) | list %}
     {% set darker = pool | selectattr('h_avg', 'gt', f_avg) | list %}
     {% set res = 0 %}
     {% set method = "No data" %}
 
     {# 4. Decision logic #}
-    {% if brighter | count > 0 and (pool | selectattr('h_avg', 'ge', f_avg) | list | count == 0) %}
+    {% if brighter | count > 0 and darker | count == 0 %}
       {% set method = "Light reduction" %}
       {% set worst_day = brighter | sort(attribute='y_korr') | first %}
       {% set res = worst_day.y_korr * ([120 - f_avg, 5.0] | max / [120 - worst_day.h_avg, 5.0] | max) %}
@@ -90,7 +100,7 @@
     {% set final_val = (res / scale) * snow_factor_today %}
 
 **Forecast:**
-## {{ final_val | round(2) }} kWh
+## {{ (0.0 if is_night else final_val) | round(2) }} kWh
 *Basis: **{{ f_avg }}%** clouds | **{{ method }}***
 {% if snow_factor_today < 1.0 %}⚠️ **Snow suspected! ({{ (snow_factor_today * 100) | round(0) }}%)**{% endif %}
 
