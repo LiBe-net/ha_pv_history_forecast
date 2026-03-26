@@ -20,9 +20,9 @@ ids AS (
 ),
 
 pv_activity AS (
-    /* Sonnenauf-/Untergang aus sun.sun-Statuswechseln (UTC-Epochen, direkt korrekt) */
-    /* Sonnenaufgang = erster 'above_horizon'-Eintrag gestern                        */
-    /* Sonnenuntergang = erster 'below_horizon'-Eintrag gestern nach 10:00 UTC       */
+    /* Sonnenaufgang = erster 'above_horizon'-Eintrag gestern (UTC-Epoche, direkt korrekt)  */
+    /* Sonnenuntergang = erster 'below_horizon'-Eintrag NACH dem Sonnenaufgang gestern      */
+    /* Kein UTC-Stunden-Filter nötig: Reihenfolge above → below schließt Mitternachtseinträge aus */
     SELECT
         COALESCE((
             SELECT strftime('%H:%M', last_updated_ts, 'unixepoch')
@@ -36,9 +36,14 @@ pv_activity AS (
             SELECT strftime('%H:%M', last_updated_ts, 'unixepoch')
             FROM states
             WHERE metadata_id = (SELECT sun_id FROM ids)
-              AND date(last_updated_ts, 'unixepoch', (SELECT offset FROM vars)) = date('now', (SELECT offset FROM vars), '-1 day')
               AND state = 'below_horizon'
-              AND strftime('%H', last_updated_ts, 'unixepoch') >= '10'
+              AND last_updated_ts > (
+                  SELECT last_updated_ts FROM states
+                  WHERE metadata_id = (SELECT sun_id FROM ids)
+                    AND date(last_updated_ts, 'unixepoch', (SELECT offset FROM vars)) = date('now', (SELECT offset FROM vars), '-1 day')
+                    AND state = 'above_horizon'
+                  ORDER BY last_updated_ts ASC LIMIT 1
+              )
             ORDER BY last_updated_ts ASC LIMIT 1
         ), '17:30') as sun_end
     FROM ids
