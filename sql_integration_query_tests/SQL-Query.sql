@@ -15,37 +15,31 @@ ids AS (
         (SELECT metadata_id FROM states_meta WHERE entity_id = (SELECT sensor_clouds FROM vars)) as w_id_states,
         (SELECT id FROM statistics_meta WHERE statistic_id = (SELECT sensor_pv FROM vars) LIMIT 1) as p_id,
         (SELECT metadata_id FROM states_meta WHERE entity_id = (SELECT sensor_pv FROM vars) LIMIT 1) as p_id_states,
-        (SELECT metadata_id FROM states_meta WHERE entity_id = (SELECT sensor_forecast FROM vars) LIMIT 1) as f_id
+        (SELECT metadata_id FROM states_meta WHERE entity_id = (SELECT sensor_forecast FROM vars) LIMIT 1) as f_id,
+        (SELECT metadata_id FROM states_meta WHERE entity_id = 'sun.sun') as sun_id
 ),
 
 pv_activity AS (
-    /* Ermittelt die Sonnenauf- und Untergangszeiten basierend auf der gestrigen PV-Produktion */
-    SELECT 
+    /* Sonnenauf-/Untergang aus sun.sun-Statuswechseln (UTC-Epochen, direkt korrekt) */
+    /* Sonnenaufgang = erster 'above_horizon'-Eintrag gestern                        */
+    /* Sonnenuntergang = erster 'below_horizon'-Eintrag gestern nach 10:00 UTC       */
+    SELECT
         COALESCE((
-            SELECT strftime('%H:%M', last_updated_ts, 'unixepoch') 
-            FROM states 
-            WHERE metadata_id = (SELECT p_id_states FROM ids) 
-              AND date(last_updated_ts, 'unixepoch', (SELECT offset FROM vars)) = date('now', (SELECT offset FROM vars), '-1 day') 
-              AND state NOT IN ('unknown','0','0.0','unavailable') 
+            SELECT strftime('%H:%M', last_updated_ts, 'unixepoch')
+            FROM states
+            WHERE metadata_id = (SELECT sun_id FROM ids)
+              AND date(last_updated_ts, 'unixepoch', (SELECT offset FROM vars)) = date('now', (SELECT offset FROM vars), '-1 day')
+              AND state = 'above_horizon'
             ORDER BY last_updated_ts ASC LIMIT 1
         ), '05:30') as sun_start,
         COALESCE((
-            -- Letzter Zeitpunkt, an dem der kumulative Sensor noch UNTER seinem Tagesmaximum lag
-            -- = letzter aktiver Produktionszeitpunkt (Sonnenuntergang).
-            -- state DESC LIMIT 1 wäre falsch: kumulativer Sensor bleibt bis Mitternacht auf Max-Wert.
-            SELECT strftime('%H:%M', last_updated_ts, 'unixepoch') 
-            FROM states 
-            WHERE metadata_id = (SELECT p_id_states FROM ids) 
-              AND date(last_updated_ts, 'unixepoch', (SELECT offset FROM vars)) = date('now', (SELECT offset FROM vars), '-1 day') 
-              AND state NOT IN ('unknown', 'unavailable', '')
-              AND CAST(state AS FLOAT) < (
-                  SELECT MAX(CAST(state AS FLOAT))
-                  FROM states
-                  WHERE metadata_id = (SELECT p_id_states FROM ids)
-                    AND date(last_updated_ts, 'unixepoch', (SELECT offset FROM vars)) = date('now', (SELECT offset FROM vars), '-1 day')
-                    AND state NOT IN ('unknown', 'unavailable', '')
-              )
-            ORDER BY last_updated_ts DESC LIMIT 1
+            SELECT strftime('%H:%M', last_updated_ts, 'unixepoch')
+            FROM states
+            WHERE metadata_id = (SELECT sun_id FROM ids)
+              AND date(last_updated_ts, 'unixepoch', (SELECT offset FROM vars)) = date('now', (SELECT offset FROM vars), '-1 day')
+              AND state = 'below_horizon'
+              AND strftime('%H', last_updated_ts, 'unixepoch') >= '10'
+            ORDER BY last_updated_ts ASC LIMIT 1
         ), '17:30') as sun_end
     FROM ids
 ),

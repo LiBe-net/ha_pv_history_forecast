@@ -15,15 +15,8 @@
   {% if data | length > 0 %}
     {% set f_avg = data[0].f_avg_today_remaining | float(default=50.0) %}
 
-    {# 0. NIGHT-CHECK (same logic as sensor templates) #}
-    {% set now_min = utcnow().hour * 60 + utcnow().minute %}
-    {% set pv_end = data[0].pv_end | default('17:30') %}
-    {% set pv_start = data[0].pv_start | default('05:30') %}
-    {% set end_min = (pv_end.split(':')[0] | int) * 60 + (pv_end.split(':')[1] | int) %}
-    {% set start_min = (pv_start.split(':')[0] | int) * 60 + (pv_start.split(':')[1] | int) %}
-    {% set offset_min = (now().utcoffset().total_seconds() / 60) | int %}
-    {% set midnight_utc_min = (24 * 60 - offset_min) % (24 * 60) %}
-    {% set is_night = (end_min <= now_min < midnight_utc_min) or now_min < start_min %}
+    {# 0. NIGHT-CHECK: delegate to HA sun entity — exact, DST-safe, timezone-agnostic #}
+    {% set is_night = states('sun.sun') == 'below_horizon' %}
 
     {# 1. SEASONAL SNOW DETECTION (Dec / Jan / Feb) #}
     {% set current_month = now().month %}
