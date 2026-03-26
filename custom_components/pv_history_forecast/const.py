@@ -90,7 +90,7 @@ DEFAULT_VALUE_TEMPLATE = """{# PV FORECAST: Remaining yield today, weighted aver
 
     {# --- 5. FORECAST CALCULATION --- #}
     {% set pool = ns_pool.items %}
-    {% set brighter = pool | selectattr('h_avg', 'lt', f_avg) | list %}
+    {% set brighter = pool | selectattr('h_avg', 'le', f_avg) | list %}
     {% set darker = pool | selectattr('h_avg', 'gt', f_avg) | list %}
     {% set res = 0 %}
     {% if brighter | count > 0 and darker | count == 0 %}
@@ -241,7 +241,7 @@ DEFAULT_VALUE_TEMPLATE_TOMORROW = """{# PV FORECAST TOMORROW: Total yield tomorr
   {% endfor %}
 
   {% set pool = ns_pool.items %}
-  {% set brighter = pool | selectattr('h_avg', 'lt', f_avg_tomorrow) | list %}
+  {% set brighter = pool | selectattr('h_avg', 'le', f_avg_tomorrow) | list %}
   {% set darker = pool | selectattr('h_avg', 'gt', f_avg_tomorrow) | list %}
   {% set res = 0 %}
   {% if brighter | count > 0 and darker | count == 0 %}
@@ -500,13 +500,13 @@ DEFAULT_LOVELACE_TEMPLATE = """{# ==============================================
     {% endfor %}
 
     {% set pool = ns_pool.items | selectattr('filtered', 'equalto', false) | list %}
-    {% set brighter = pool | selectattr('h_avg', 'lt', f_avg) | list %}
+    {% set brighter = pool | selectattr('h_avg', 'le', f_avg) | list %}
     {% set darker = pool | selectattr('h_avg', 'gt', f_avg) | list %}
     {% set res = 0 %}
     {% set method = "No data" %}
 
     {# 4. Decision logic #}
-    {% if brighter | count > 0 and (pool | selectattr('h_avg', 'ge', f_avg) | list | count == 0) %}
+    {% if brighter | count > 0 and darker | count == 0 %}
       {% set method = "Light reduction" %}
       {% set worst_day = brighter | sort(attribute='y_korr') | first %}
       {% set res = worst_day.y_korr * ([120 - f_avg, 5.0] | max / [120 - worst_day.h_avg, 5.0] | max) %}
