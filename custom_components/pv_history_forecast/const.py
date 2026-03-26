@@ -149,7 +149,7 @@ DEFAULT_VALUE_TEMPLATE_MIN = """{# PV-PROGNOSE MINIMUM: Pessimistischer Tagesres
       {% endif %}
     {% endfor %}
     {% set top5 = (ns_pool.items | sort(attribute='diff'))[:5] %}
-    {% set brighter = top5 | selectattr('h_avg', 'lt', f_avg) | list %}
+    {% set brighter = top5 | selectattr('h_avg', 'le', f_avg) | list %}
     {% set darker = top5 | selectattr('h_avg', 'gt', f_avg) | list %}
     {% set res = 0 %}
     {% if top5 | count > 0 %}
