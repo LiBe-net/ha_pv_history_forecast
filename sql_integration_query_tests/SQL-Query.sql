@@ -20,9 +20,10 @@ ids AS (
 ),
 
 pv_activity AS (
-    /* Sonnenaufgang = erster 'above_horizon'-Eintrag gestern (UTC-Epoche, direkt korrekt)  */
-    /* Sonnenuntergang = erster 'below_horizon'-Eintrag NACH dem Sonnenaufgang gestern      */
-    /* Kein UTC-Stunden-Filter nötig: Reihenfolge above → below schließt Mitternachtseinträge aus */
+    /* Sonnenaufgang = erster 'above_horizon'-Eintrag gestern (UTC-Epoche, direkt korrekt)       */
+    /* Sonnenuntergang = erster 'below_horizon'-Eintrag NACH dem Sonnenaufgang gestern           */
+    /* sun_start/sun_end = UTC HH:MM  → verwendet für BETWEEN mit UTC-Forecast-Datetimes (+00:00) */
+    /* sun_start_local/sun_end_local = lokal HH:MM → nur für Phasenerkennung (vor/nach Auf/Unt)  */
     SELECT
         COALESCE((
             SELECT strftime('%H:%M', last_updated_ts, 'unixepoch')
@@ -45,7 +46,29 @@ pv_activity AS (
                   ORDER BY last_updated_ts ASC LIMIT 1
               )
             ORDER BY last_updated_ts ASC LIMIT 1
-        ), '17:30') as sun_end
+        ), '17:30') as sun_end,
+        COALESCE((
+            SELECT strftime('%H:%M', last_updated_ts, 'unixepoch', (SELECT offset FROM vars))
+            FROM states
+            WHERE metadata_id = (SELECT sun_id FROM ids)
+              AND date(last_updated_ts, 'unixepoch', (SELECT offset FROM vars)) = date('now', (SELECT offset FROM vars), '-1 day')
+              AND state = 'above_horizon'
+            ORDER BY last_updated_ts ASC LIMIT 1
+        ), '06:30') as sun_start_local,
+        COALESCE((
+            SELECT strftime('%H:%M', last_updated_ts, 'unixepoch', (SELECT offset FROM vars))
+            FROM states
+            WHERE metadata_id = (SELECT sun_id FROM ids)
+              AND state = 'below_horizon'
+              AND last_updated_ts > (
+                  SELECT last_updated_ts FROM states
+                  WHERE metadata_id = (SELECT sun_id FROM ids)
+                    AND date(last_updated_ts, 'unixepoch', (SELECT offset FROM vars)) = date('now', (SELECT offset FROM vars), '-1 day')
+                    AND state = 'above_horizon'
+                  ORDER BY last_updated_ts ASC LIMIT 1
+              )
+            ORDER BY last_updated_ts ASC LIMIT 1
+        ), '18:30') as sun_end_local
     FROM ids
 ),
 
@@ -61,9 +84,16 @@ forecast_val AS (
            -- Match forecast date against local "today" (via UTC offset)
            AND substr(json_extract(f.value, '$.datetime'), 1, 10) = date('now', (SELECT offset FROM vars))
            AND substr(json_extract(f.value, '$.datetime'), 12, 5) 
-               BETWEEN CASE 
-                         WHEN strftime('%H:%M', 'now') > (SELECT sun_start FROM pv_activity) THEN strftime('%H:%M', 'now') 
-                         ELSE (SELECT sun_start FROM pv_activity) 
+               BETWEEN CASE
+                         -- Forecast slots are UTC: compare against UTC sun_start/sun_end.
+                         -- Only the window START shifts: during local day use current UTC time
+                         -- (remaining today); before/after local daylight use full-day window
+                         -- (midnight use-case: forecast for the whole coming day).
+                         WHEN strftime('%H:%M', 'now', (SELECT offset FROM vars))
+                              BETWEEN (SELECT sun_start_local FROM pv_activity)
+                                  AND (SELECT sun_end_local   FROM pv_activity)
+                             THEN strftime('%H:%M', 'now')
+                         ELSE (SELECT sun_start FROM pv_activity)
                        END
                AND (SELECT sun_end FROM pv_activity)
         ), 50.0) as f_avg
@@ -140,14 +170,16 @@ SELECT json_group_array(
         'h_avg_total', ROUND(h_avg_total_val, 1),
         'h_avg_remaining', ROUND(h_avg_rest_val, 1),
         'yield_day_total', ROUND(day_max - day_min, 2),
-        -- Dreistufige Logik für den Restertrag (alle Zeiten in UTC):
-        -- 1. Vor Sonnenaufgang (00:00 bis sun_start): Gesamter Tagesertrag als Prognose.
-        -- 2. Im PV-Fenster (sun_start bis sun_end): Verbleibender Restertrag ab jetzt.
-        -- 3. Nach Sonnenuntergang (sun_end bis 23:59): 0.0 (Tag abgeschlossen).
-        'yield_day_remaining', ROUND(CASE 
-            WHEN strftime('%H:%M', 'now') > (SELECT sun_end FROM pv_activity)
+        -- Dreistufige Logik für den Restertrag (Phasenerkennung in LOKALZEIT!):
+        -- Lokale Zeit verwenden, da UTC-Vergleich zwischen lok. Mitternacht (= 23:00 UTC CET)
+        -- und 00:00 UTC fälschlich '23:xx' > sun_end '17:32' → 0.0 liefert.
+        -- 1. Nach lok. Sonnenuntergang: 0.0
+        -- 2. Vor lok. Sonnenaufgang (inkl. Mitternacht lokal): Gesamter Tagesertrag als Prognose.
+        -- 3. Im PV-Fenster: Verbleibender Restertrag ab jetzt.
+        'yield_day_remaining', ROUND(CASE
+            WHEN strftime('%H:%M', 'now', (SELECT offset FROM vars)) > (SELECT sun_end_local   FROM pv_activity)
                 THEN 0.0
-            WHEN strftime('%H:%M', 'now') < (SELECT sun_start FROM pv_activity)
+            WHEN strftime('%H:%M', 'now', (SELECT offset FROM vars)) < (SELECT sun_start_local FROM pv_activity)
                 THEN (day_max - day_min)
             ELSE MAX(0, 
                 ((h_hour_curr - h_hour_prev) * (1.0 - (CAST(strftime('%M', 'now') AS FLOAT) / 60.0)) * 

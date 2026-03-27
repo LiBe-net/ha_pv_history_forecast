@@ -276,8 +276,10 @@ ids AS (
 ),
 
 pv_activity AS (
-    /* sunrise = first above_horizon transition yesterday */
-    /* sunset  = first below_horizon transition AFTER sunrise (no UTC-hour heuristic needed) */
+    /* sunrise = first above_horizon transition yesterday (UTC epoch stored, displayed as UTC HH:MM) */
+    /* sunset  = first below_horizon transition AFTER sunrise                                       */
+    /* _local columns = same instants displayed in local time – used for phase detection only       */
+    /* Forecast datetimes are UTC (+00:00), so sun_start/sun_end (UTC) are used for BETWEEN.        */
     SELECT 
         COALESCE((
             SELECT strftime('%H:%M', last_updated_ts, 'unixepoch')
@@ -300,7 +302,29 @@ pv_activity AS (
                   ORDER BY last_updated_ts ASC LIMIT 1
               )
             ORDER BY last_updated_ts ASC LIMIT 1
-        ), '17:30') as sun_end
+        ), '17:30') as sun_end,
+        COALESCE((
+            SELECT strftime('%H:%M', last_updated_ts, 'unixepoch', (SELECT offset FROM vars))
+            FROM states
+            WHERE metadata_id = (SELECT sun_id FROM ids)
+              AND date(last_updated_ts, 'unixepoch', (SELECT offset FROM vars)) = date('now', (SELECT offset FROM vars), '-1 day')
+              AND state = 'above_horizon'
+            ORDER BY last_updated_ts ASC LIMIT 1
+        ), '06:30') as sun_start_local,
+        COALESCE((
+            SELECT strftime('%H:%M', last_updated_ts, 'unixepoch', (SELECT offset FROM vars))
+            FROM states
+            WHERE metadata_id = (SELECT sun_id FROM ids)
+              AND state = 'below_horizon'
+              AND last_updated_ts > (
+                  SELECT last_updated_ts FROM states
+                  WHERE metadata_id = (SELECT sun_id FROM ids)
+                    AND date(last_updated_ts, 'unixepoch', (SELECT offset FROM vars)) = date('now', (SELECT offset FROM vars), '-1 day')
+                    AND state = 'above_horizon'
+                  ORDER BY last_updated_ts ASC LIMIT 1
+              )
+            ORDER BY last_updated_ts ASC LIMIT 1
+        ), '18:30') as sun_end_local
     FROM ids
 ),
 
@@ -313,10 +337,17 @@ forecast_val AS (
          WHERE s.metadata_id = (SELECT f_id FROM ids) 
            AND s.last_updated_ts = (SELECT MAX(last_updated_ts) FROM states WHERE metadata_id = (SELECT f_id FROM ids)) 
            AND substr(json_extract(f.value, '$.datetime'), 1, 10) = date('now', (SELECT offset FROM vars))
-           AND substr(json_extract(f.value, '$.datetime'), 12, 5) 
-               BETWEEN CASE 
-                         WHEN strftime('%H:%M', 'now') > (SELECT sun_start FROM pv_activity) THEN strftime('%H:%M', 'now') 
-                         ELSE (SELECT sun_start FROM pv_activity) 
+           AND substr(json_extract(f.value, '$.datetime'), 12, 5)
+               BETWEEN CASE
+                         /* Forecast slots are UTC: compare against UTC sun_start/sun_end.          */
+                         /* Only the start of the window shifts: during the day use current UTC     */
+                         /* time (remaining today); before local sunrise or after local sunset use  */
+                         /* full day window (midnight use-case: forecast for the whole coming day). */
+                         WHEN strftime('%H:%M', 'now', (SELECT offset FROM vars))
+                              BETWEEN (SELECT sun_start_local FROM pv_activity)
+                                  AND (SELECT sun_end_local   FROM pv_activity)
+                             THEN strftime('%H:%M', 'now')
+                         ELSE (SELECT sun_start FROM pv_activity)
                        END
                AND (SELECT sun_end FROM pv_activity)
         ), 50.0) as f_avg
@@ -402,10 +433,12 @@ SELECT COALESCE(json_group_array(
         'h_avg_total', ROUND(h_avg_total_val, 1),
         'h_avg_remaining', ROUND(h_avg_rest_val, 1),
         'yield_day_total', ROUND((day_max - day_min) / (SELECT pv_divisor FROM vars), 2),
-        'yield_day_remaining', ROUND(CASE 
-            WHEN strftime('%H:%M', 'now') > (SELECT sun_end FROM pv_activity)
+        'yield_day_remaining', ROUND(CASE
+            /* Phase detection must use LOCAL time: UTC HH:MM fails between local midnight        */
+            /* and 00:00 UTC (e.g. 23:00 UTC > sun_end 17:32 UTC → wrongly returns 0.0).         */
+            WHEN strftime('%H:%M', 'now', (SELECT offset FROM vars)) > (SELECT sun_end_local   FROM pv_activity)
                 THEN 0.0
-            WHEN strftime('%H:%M', 'now') < (SELECT sun_start FROM pv_activity)
+            WHEN strftime('%H:%M', 'now', (SELECT offset FROM vars)) < (SELECT sun_start_local FROM pv_activity)
                 THEN (day_max - day_min) / (SELECT pv_divisor FROM vars)
             ELSE MAX(0, 
                 ((h_hour_curr - h_hour_prev) * (1.0 - (CAST(strftime('%M', 'now') AS FLOAT) / 60.0)) * 
