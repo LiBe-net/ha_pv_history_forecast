@@ -255,6 +255,58 @@ DEFAULT_VALUE_TEMPLATE_TOMORROW = """{# PV FORECAST TOMORROW: Total yield tomorr
   0.0
 {% endif %}"""
 
+DEFAULT_VALUE_TEMPLATE_METHOD_TODAY = """{#- Return the decision method used for remaining-today forecast -#}
+{% set raw = value %}
+{% if raw and raw != '[]' and raw is not none %}
+  {% set data = raw | from_json %}
+  {% if data | length > 0 %}
+    {% set f_avg = data[0].f_avg_today_remaining | float(default=50.0) %}
+    {% set current_month = now().month %}
+    {% set ns_pool = namespace(items=[]) %}
+    {% for item in data %}
+      {% set yield_raw = item.yield_day_remaining | float(default=0) %}
+      {% set clouds = item.h_avg_remaining | float(default=0) %}
+      {% if yield_raw > 0.05 or clouds > 95 or current_month in [12, 1, 2] %}
+        {% set ns_pool.items = ns_pool.items + [{'h_avg': clouds}] %}
+      {% endif %}
+    {% endfor %}
+    {% set pool = ns_pool.items %}
+    {% set brighter = pool | selectattr('h_avg', 'le', f_avg) | list %}
+    {% set darker = pool | selectattr('h_avg', 'gt', f_avg) | list %}
+    {% if brighter | count > 0 and darker | count == 0 %}Light reduction
+    {% elif darker | count > 0 and pool | selectattr('h_avg', 'le', f_avg) | list | count == 0 %}Max assumption
+    {% elif pool | count > 0 %}Weighted average
+    {% else %}No data
+    {% endif %}
+  {% else %}No data
+  {% endif %}
+{% else %}No data
+{% endif %}"""
+
+DEFAULT_VALUE_TEMPLATE_METHOD_TOMORROW = """{#- Return the decision method used for tomorrow forecast -#}
+{% set raw = value %}
+{% if raw and raw != '[]' and raw is not none %}
+  {% set data = raw | from_json %}
+  {% if data | length > 0 %}
+    {% set f_avg_tomorrow = data[0].f_avg_tomorrow | float(default=50.0) %}
+    {% set ns_pool = namespace(items=[]) %}
+    {% for item in data %}
+      {% set clouds_hist = item.h_avg_total | float(default=0) %}
+      {% set ns_pool.items = ns_pool.items + [{'h_avg': clouds_hist}] %}
+    {% endfor %}
+    {% set pool = ns_pool.items %}
+    {% set brighter = pool | selectattr('h_avg', 'le', f_avg_tomorrow) | list %}
+    {% set darker = pool | selectattr('h_avg', 'gt', f_avg_tomorrow) | list %}
+    {% if brighter | count > 0 and darker | count == 0 %}Light reduction
+    {% elif darker | count > 0 and pool | selectattr('h_avg', 'le', f_avg_tomorrow) | list | count == 0 %}Max assumption
+    {% elif pool | count > 0 %}Weighted average
+    {% else %}No data
+    {% endif %}
+  {% else %}No data
+  {% endif %}
+{% else %}No data
+{% endif %}"""
+
 DEFAULT_UNIT_OF_MEASUREMENT = "kWh"
 DEFAULT_DEVICE_CLASS = "energy"
 DEFAULT_STATE_CLASS = "total_increasing"

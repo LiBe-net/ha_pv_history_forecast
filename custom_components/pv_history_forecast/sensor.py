@@ -37,6 +37,8 @@ from .const import (
     DEFAULT_VALUE_TEMPLATE_MIN,
     DEFAULT_VALUE_TEMPLATE_MAX,
     DEFAULT_VALUE_TEMPLATE_TOMORROW,
+    DEFAULT_VALUE_TEMPLATE_METHOD_TODAY,
+    DEFAULT_VALUE_TEMPLATE_METHOD_TOMORROW,
     DEFAULT_LOVELACE_TEMPLATE,
     DEFAULT_LOVELACE_TEMPLATE_REMAINING_TODAY,
     DEFAULT_LOVELACE_TEMPLATE_TOMORROW,
@@ -158,8 +160,22 @@ async def async_setup_entry(
         name=f"{prefix}_cloud_tomorrow",
         json_field="f_avg_tomorrow",
     )
+    method_today_sensor = PVForecastTemplateSensor(
+        hass=hass,
+        config_entry=config_entry,
+        main_entity_id=main_entity_id,
+        name=f"{prefix}_method_remaining_today",
+        value_template=DEFAULT_VALUE_TEMPLATE_METHOD_TODAY,
+    )
+    method_tomorrow_sensor = PVForecastTemplateSensor(
+        hass=hass,
+        config_entry=config_entry,
+        main_entity_id=main_entity_id,
+        name=f"{prefix}_method_tomorrow",
+        value_template=DEFAULT_VALUE_TEMPLATE_METHOD_TOMORROW,
+    )
 
-    entities = [sql_sensor, min_sensor, max_sensor, tomorrow_sensor, cloud_today_sensor, cloud_tomorrow_sensor]
+    entities = [sql_sensor, min_sensor, max_sensor, tomorrow_sensor, cloud_today_sensor, cloud_tomorrow_sensor, method_today_sensor, method_tomorrow_sensor]
 
     # Create dedicated cloud coverage sensor when no external sensor is configured.
     # Mirrors cloud_coverage from the weather entity so HA accumulates LTS statistics.
