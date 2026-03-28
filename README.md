@@ -10,23 +10,29 @@ based on historical yield data from the Home Assistant database.
 ## Installation
 
 1. Open **HACS** → **⋮ → Add custom repository**
-2. URL: \LiBe-net/ha_pv_history_forecast\ — Category: **Integration**
+2. URL: LiBe-net/ha_pv_history_forecast — Category: **Integration**
 3. Install **PV History Forecast** and restart Home Assistant
 4. **Settings → Devices & Services** → Add **PV History Forecast**
 
 ## Lovelace Card
 
-\\yaml
+```yaml
 type: markdown
 content: >-
-  <h2>calc remaining today:</h2>
+  Forecast remaining today: <b><big>{{ states.sensor.pv_hist_remaining_today.state | round(2)}} kWh</big></b> 
+  remaining cloud cover: <b><big>{{ states.sensor.pv_hist_cloud_remaining_today.state }}%</big></b>
   
   {{ state_attr('sensor.pv_hist_remaining_today', 'lovelace_card_remaining_today') }}
-  
-  <h2>calc tomorrow</h2>
+```
+
+```yaml
+type: markdown
+content: >-
+  Forecast remaining for tomorrow: <b><big>{{ states.sensor.pv_hist_tomorrow.state | round(2)}} kWh</big></b>
+  Cloud cover tomorrow: <b><big>{{ states.sensor.pv_hist_cloud_tomorrow.state }}%</big></b>
   
   {{ state_attr('sensor.pv_hist_remaining_today', 'lovelace_card_tomorrow') }}
-\
+```
 ## License
 
 MIT — see [LICENSE](LICENSE)
