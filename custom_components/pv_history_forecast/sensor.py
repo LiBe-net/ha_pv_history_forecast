@@ -144,7 +144,22 @@ async def async_setup_entry(
         prefix=prefix,
     )
 
-    entities = [sql_sensor, min_sensor, max_sensor, tomorrow_sensor]
+    cloud_today_sensor = CloudForecastSensor(
+        hass=hass,
+        config_entry=config_entry,
+        main_entity_id=main_entity_id,
+        name=f"{prefix}_cloud_remaining_today",
+        json_field="f_avg_today_remaining",
+    )
+    cloud_tomorrow_sensor = CloudForecastSensor(
+        hass=hass,
+        config_entry=config_entry,
+        main_entity_id=main_entity_id,
+        name=f"{prefix}_cloud_tomorrow",
+        json_field="f_avg_tomorrow",
+    )
+
+    entities = [sql_sensor, min_sensor, max_sensor, tomorrow_sensor, cloud_today_sensor, cloud_tomorrow_sensor]
 
     # Create dedicated cloud coverage sensor when no external sensor is configured.
     # Mirrors cloud_coverage from the weather entity so HA accumulates LTS statistics.
@@ -585,4 +600,66 @@ class CloudCoverageSensor(SensorEntity):
     @property
     def should_poll(self) -> bool:
         return True
+
+
+class CloudForecastSensor(SensorEntity):
+    """Exposes a single numeric field from the main sensor's SQL JSON result.
+
+    Used to surface the cloud-coverage values that the forecast calculation
+    actually uses (f_avg_today_remaining, f_avg_tomorrow) as proper HA sensors,
+    so their history is visible in the UI and available for automations.
+    """
+
+    _attr_icon = "mdi:weather-cloudy"
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        config_entry: ConfigEntry,
+        main_entity_id: str,
+        name: str,
+        json_field: str,
+    ) -> None:
+        """Initialize the sensor."""
+        self.hass = hass
+        self.config_entry = config_entry
+        self._main_entity_id = main_entity_id
+        self._json_field = json_field
+        self._attr_name = name
+        self._attr_unique_id = f"{DOMAIN}_{config_entry.entry_id}_{name}"
+        self._attr_native_value = None
+        self._attr_available = False
+        self.entity_id = generate_entity_id("sensor.{}", name, hass=hass)
+
+    async def async_update(self) -> None:
+        """Read the target field from the main sensor's raw JSON attribute."""
+        main_state = self.hass.states.get(self._main_entity_id)
+        if main_state is None:
+            self._attr_available = False
+            return
+        raw = main_state.attributes.get("sql_raw_json")
+        if not raw:
+            self._attr_available = False
+            return
+        try:
+            data = json.loads(raw)
+            if isinstance(data, list) and data:
+                value = data[0].get(self._json_field)
+                if value is not None:
+                    self._attr_native_value = float(value)
+                    self._attr_available = True
+                    return
+        except (ValueError, TypeError, KeyError):
+            pass
+        self._attr_available = False
+
+    @property
+    def should_poll(self) -> bool:
+        return True
+
+    @property
+    def update_interval(self) -> timedelta | None:
+        return timedelta(minutes=5)
 
