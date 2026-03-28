@@ -38,6 +38,8 @@ from .const import (
     DEFAULT_VALUE_TEMPLATE_MAX,
     DEFAULT_VALUE_TEMPLATE_TOMORROW,
     DEFAULT_LOVELACE_TEMPLATE,
+    DEFAULT_LOVELACE_TEMPLATE_REMAINING_TODAY,
+    DEFAULT_LOVELACE_TEMPLATE_TOMORROW,
     DEFAULT_SQL_QUERY,
     DEFAULT_UNIT_OF_MEASUREMENT,
     DEFAULT_DEVICE_CLASS,
@@ -63,9 +65,11 @@ async def async_setup_entry(
     # Get weather coordinator
     coordinator: WeatherCoordinator = hass.data[DOMAIN][config_entry.entry_id].get("weather_coordinator")
 
-    # Pre-build Lovelace template (substitute forecast sensor once at setup)
+    # Pre-build Lovelace templates (substitute forecast sensor once at setup)
     forecast_entity_id = data.get(CONF_SENSOR_FORECAST, f"sensor.{prefix}_weather_forecast")
     lovelace_template_str = DEFAULT_LOVELACE_TEMPLATE.replace("__FORECAST_SENSOR__", forecast_entity_id)
+    lovelace_today_str = DEFAULT_LOVELACE_TEMPLATE_REMAINING_TODAY
+    lovelace_tomorrow_str = DEFAULT_LOVELACE_TEMPLATE_TOMORROW
 
     # Always regenerate the SQL query from current DEFAULT_SQL_QUERY + stored config.
     # This ensures any update to DEFAULT_SQL_QUERY (new CTEs, fallback UNIONs etc.)
@@ -103,6 +107,8 @@ async def async_setup_entry(
         state_class=options.get(CONF_STATE_CLASS, DEFAULT_STATE_CLASS),
         sql_query=sql_query,
         lovelace_template_str=lovelace_template_str,
+        lovelace_today_str=lovelace_today_str,
+        lovelace_tomorrow_str=lovelace_tomorrow_str,
     )
 
     main_entity_id = f"sensor.{prefix}_remaining_today"
@@ -203,6 +209,8 @@ class SQLPVForecastSensor(SensorEntity):
         state_class: str,
         sql_query: str | None = None,
         lovelace_template_str: str | None = None,
+        lovelace_today_str: str | None = None,
+        lovelace_tomorrow_str: str | None = None,
     ) -> None:
         """Initialize the sensor."""
         self.hass = hass
@@ -223,7 +231,11 @@ class SQLPVForecastSensor(SensorEntity):
         self._raw_data: list | None = None
         self._last_raw_result: str | None = None
         self._lovelace_card: str | None = None
+        self._lovelace_card_remaining_today: str | None = None
+        self._lovelace_card_tomorrow: str | None = None
         self._lovelace_template_str = lovelace_template_str
+        self._lovelace_today_str = lovelace_today_str
+        self._lovelace_tomorrow_str = lovelace_tomorrow_str
         self._sql_query_template = sql_query
         self._sql_query = None
         self._engine = None
@@ -314,6 +326,20 @@ FROM vars
                     except Exception as lovelace_err:
                         _LOGGER.error("Failed to render lovelace_card: %s", lovelace_err)
                         self._lovelace_card = None
+                if self._lovelace_today_str:
+                    try:
+                        tmpl = Template(self._lovelace_today_str, self.hass)
+                        self._lovelace_card_remaining_today = str(tmpl.async_render({"raw_json": result}))
+                    except Exception as lovelace_err:
+                        _LOGGER.error("Failed to render lovelace_card_remaining_today: %s", lovelace_err)
+                        self._lovelace_card_remaining_today = None
+                if self._lovelace_tomorrow_str:
+                    try:
+                        tmpl = Template(self._lovelace_tomorrow_str, self.hass)
+                        self._lovelace_card_tomorrow = str(tmpl.async_render({"raw_json": result}))
+                    except Exception as lovelace_err:
+                        _LOGGER.error("Failed to render lovelace_card_tomorrow: %s", lovelace_err)
+                        self._lovelace_card_tomorrow = None
                 self._attr_available = True
             else:
                 _LOGGER.warning("SQL query returned no rows")
@@ -367,6 +393,10 @@ FROM vars
             attrs["sql_raw_json"] = self._last_raw_result
         if self._lovelace_card is not None:
             attrs["lovelace_card"] = self._lovelace_card
+        if self._lovelace_card_remaining_today is not None:
+            attrs["lovelace_card_remaining_today"] = self._lovelace_card_remaining_today
+        if self._lovelace_card_tomorrow is not None:
+            attrs["lovelace_card_tomorrow"] = self._lovelace_card_tomorrow
         rows = self._raw_data if isinstance(self._raw_data, list) else []
         attrs["matching_days_count"] = len(rows)
         if rows:
