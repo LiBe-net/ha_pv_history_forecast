@@ -19,7 +19,13 @@ based on historical yield data from the Home Assistant database.
 \\yaml
 type: markdown
 content: >-
-  {{ state_attr('sensor.pv_hist_remaining_today', 'lovelace_card') }}
+  <h2>calc remaining today:</h2>
+  
+  {{ state_attr('sensor.pv_hist_remaining_today', 'lovelace_card_remaining_today') }}
+  
+  <h2>calc tomorrow</h2>
+  
+  {{ state_attr('sensor.pv_hist_remaining_today', 'lovelace_card_tomorrow') }}
 \
 ## License
 

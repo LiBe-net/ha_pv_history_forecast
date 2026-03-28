@@ -694,10 +694,10 @@ DEFAULT_LOVELACE_TEMPLATE_TOMORROW = """{#- Tomorrow full-day table only (no hea
       {% set res = ns_mix.ws / (ns_pool.total_w if ns_pool.total_w > 0 else 1) %}
     {% endif %}
     {% set scale = 1000 if res > 200 else 1 %}
-| date | clouds | day yield | s_fakt | weight |
-| :--- | :---: | :---: | :---: | :---: |
+| date | clouds | day yield  | weight |
+| :--- | :---: | :---:  | :---: |
 {%- for item in ns_pool.items | sort(attribute='w', reverse=True) %}
-| {{ item.date }} | {{ item.h_avg }}% | **{{ (item.y_korr / scale) | round(2) }} kWh** | {{ item.s_fakt | round(2) }} | {{ (((item.w / ns_pool.total_w) * 100) if ns_pool.total_w > 0 else 0) | round(1) }}% |
+| {{ item.date }} | {{ item.h_avg }}% | **{{ (item.y_korr / scale) | round(2) }} kWh** <small><small>({{ item.s_fakt | round(2) }}x)</small></small> | {{ (((item.w / ns_pool.total_w) * 100) if ns_pool.total_w > 0 else 0) | round(1) }}% |
 {%- endfor %}
   {% endif %}
 {% endif %}"""
