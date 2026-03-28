@@ -160,14 +160,14 @@ async def async_setup_entry(
         name=f"{prefix}_cloud_tomorrow",
         json_field="f_avg_tomorrow",
     )
-    method_today_sensor = PVForecastTemplateSensor(
+    method_today_sensor = ForecastMethodSensor(
         hass=hass,
         config_entry=config_entry,
         main_entity_id=main_entity_id,
         name=f"{prefix}_method_remaining_today",
         value_template=DEFAULT_VALUE_TEMPLATE_METHOD_TODAY,
     )
-    method_tomorrow_sensor = PVForecastTemplateSensor(
+    method_tomorrow_sensor = ForecastMethodSensor(
         hass=hass,
         config_entry=config_entry,
         main_entity_id=main_entity_id,
@@ -511,6 +511,63 @@ class PVForecastTemplateSensor(SensorEntity):
         except Exception as err:
             _LOGGER.error("Failed to apply template for %s: %s", self._attr_name, err)
             return None
+
+    @property
+    def should_poll(self) -> bool:
+        return True
+
+    @property
+    def update_interval(self) -> timedelta | None:
+        return timedelta(minutes=15)
+
+
+class ForecastMethodSensor(SensorEntity):
+    """Sensor that exposes the calculation method name (Weighted average, Max assumption, etc.).
+
+    Unlike PVForecastTemplateSensor it has no numeric device class or unit so that
+    HA accepts a plain string as its state.
+    """
+
+    _attr_icon = "mdi:help-circle-outline"
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        config_entry: ConfigEntry,
+        main_entity_id: str,
+        name: str,
+        value_template: str,
+    ) -> None:
+        """Initialize the method sensor."""
+        self.hass = hass
+        self.config_entry = config_entry
+        self._main_entity_id = main_entity_id
+        self._value_template_str = value_template
+        self._attr_name = name
+        self._attr_unique_id = f"{DOMAIN}_{config_entry.entry_id}_{name}"
+        self._attr_native_value = None
+        self._attr_available = False
+        self.entity_id = generate_entity_id("sensor.{}", name, hass=hass)
+
+    async def async_update(self) -> None:
+        """Update by reading raw JSON from the main sensor's attributes."""
+        main_state = self.hass.states.get(self._main_entity_id)
+        if main_state is None or not main_state.attributes.get("sql_raw_json"):
+            self._attr_available = False
+            return
+        raw = main_state.attributes["sql_raw_json"]
+        try:
+            template = Template(self._value_template_str, self.hass)
+            rendered = template.async_render({"value": raw, "latitude": self.hass.config.latitude})
+            value = str(rendered).strip()
+            if value:
+                self._attr_native_value = value
+                self._attr_available = True
+            else:
+                self._attr_available = False
+        except Exception as err:
+            _LOGGER.error("Failed to render method template for %s: %s", self._attr_name, err)
+            self._attr_available = False
 
     @property
     def should_poll(self) -> bool:
