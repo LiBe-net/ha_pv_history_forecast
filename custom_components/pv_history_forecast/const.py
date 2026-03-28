@@ -26,8 +26,12 @@ DEFAULT_VALUE_TEMPLATE = """{# PV FORECAST: Remaining yield today, weighted aver
 {% if raw and raw != '[]' and raw is not none %}
   {% set data = raw | from_json %}
 
-  {# --- 0. NIGHT-CHECK: delegate to HA sun entity — exact, DST-safe, timezone-agnostic --- #}
-  {% if states('sun.sun') == 'below_horizon' %}
+  {# --- 0. NIGHT-CHECK: 0.0 only after local sunset until local midnight.               #}
+  {# Between local midnight and sunrise, SQL provides full-day forecast; show it.        #}
+  {% set offset_min = (now().utcoffset().total_seconds() / 60) | int %}
+  {% set pv_end_utc = data[0].pv_end | default('17:30') %}
+  {% set end_min_local = ((pv_end_utc.split(':')[0] | int) * 60 + (pv_end_utc.split(':')[1] | int) + offset_min) % 1440 %}
+  {% if (now().hour * 60 + now().minute) > end_min_local %}
     0.0
   {% else %}
 
@@ -111,7 +115,11 @@ DEFAULT_VALUE_TEMPLATE_MIN = """{# PV-PROGNOSE MINIMUM: Pessimistischer Tagesres
 {% set raw = value %}
 {% if raw and raw != '[]' and raw is not none %}
   {% set data = raw | from_json %}
-  {% if states('sun.sun') == 'below_horizon' %}
+  {# Night check: 0.0 after local sunset until midnight; midnight→sunrise uses full-day SQL data #}
+  {% set offset_min = (now().utcoffset().total_seconds() / 60) | int %}
+  {% set pv_end_utc = data[0].pv_end | default('17:30') %}
+  {% set end_min_local = ((pv_end_utc.split(':')[0] | int) * 60 + (pv_end_utc.split(':')[1] | int) + offset_min) % 1440 %}
+  {% if (now().hour * 60 + now().minute) > end_min_local %}
     0.0
   {% else %}
     {% set f_avg = data[0].f_avg_today_remaining | float(default=50.0) %}
@@ -159,7 +167,11 @@ DEFAULT_VALUE_TEMPLATE_MAX = """{# PV-PROGNOSE MAXIMUM: Optimistischer Tagesrest
 {% set raw = value %}
 {% if raw and raw != '[]' and raw is not none %}
   {% set data = raw | from_json %}
-  {% if states('sun.sun') == 'below_horizon' %}
+  {# Night check: 0.0 after local sunset until midnight; midnight→sunrise uses full-day SQL data #}
+  {% set offset_min = (now().utcoffset().total_seconds() / 60) | int %}
+  {% set pv_end_utc = data[0].pv_end | default('17:30') %}
+  {% set end_min_local = ((pv_end_utc.split(':')[0] | int) * 60 + (pv_end_utc.split(':')[1] | int) + offset_min) % 1440 %}
+  {% if (now().hour * 60 + now().minute) > end_min_local %}
     0.0
   {% else %}
     {% set f_avg = data[0].f_avg_today_remaining | float(default=50.0) %}
@@ -431,7 +443,9 @@ SELECT COALESCE(json_group_array(
         'f_avg_today_remaining', (SELECT ROUND(f_avg, 1) FROM forecast_val),        
         'f_avg_tomorrow', (SELECT ROUND(f_avg_tomorrow, 1) FROM forecast_next_day),
         'h_avg_total', ROUND(h_avg_total_val, 1),
-        'h_avg_remaining', ROUND(h_avg_rest_val, 1),
+        /* COALESCE: before sunrise h_avg_rest_val is NULL (UTC window '23:xx'..'17:xx' empty) */
+        /* Fall back to h_avg_total_val so Jinja cloud-matching works correctly at midnight.   */
+        'h_avg_remaining', ROUND(COALESCE(h_avg_rest_val, h_avg_total_val), 1),
         'yield_day_total', ROUND((day_max - day_min) / (SELECT pv_divisor FROM vars), 2),
         'yield_day_remaining', ROUND(CASE
             /* Phase detection must use LOCAL time: UTC HH:MM fails between local midnight        */
@@ -468,8 +482,11 @@ DEFAULT_LOVELACE_TEMPLATE = """{# ==============================================
   {% if data | length > 0 %}
     {% set f_avg = data[0].f_avg_today_remaining | float(default=50.0) %}
 
-    {# 0. NIGHT-CHECK: delegate to HA sun entity — exact, DST-safe, timezone-agnostic #}
-    {% set is_night = states('sun.sun') == 'below_horizon' %}
+    {# 0. NIGHT-CHECK: 0.0 only after local sunset until midnight. Midnight→sunrise: full-day forecast. #}
+    {% set offset_min = (now().utcoffset().total_seconds() / 60) | int %}
+    {% set pv_end_utc = data[0].pv_end | default('17:30') %}
+    {% set end_min_local = ((pv_end_utc.split(':')[0] | int) * 60 + (pv_end_utc.split(':')[1] | int) + offset_min) % 1440 %}
+    {% set is_night = (now().hour * 60 + now().minute) > end_min_local %}
 
     {# 1. SEASONAL SNOW DETECTION (Dec / Jan / Feb) #}
     {% set current_month = now().month %}

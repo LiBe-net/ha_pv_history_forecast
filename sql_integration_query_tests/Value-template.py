@@ -5,19 +5,14 @@
 {% if raw and raw != '[]' and raw is not none %}
   {% set data = raw | from_json %}
 
-  {# --- 0. NIGHT-CHECK (UTC-correct: pv_end and pv_start are UTC times from SQL) ---
-     Evening window [pv_end .. local midnight in UTC) → yield 0.
-     Morning window [UTC midnight .. pv_start) → yield 0.
-     (e.g. 00:00 UTC = 01:00 CET: before sunrise → 0) #}
-  {% set now_min = utcnow().hour * 60 + utcnow().minute %}
-  {% set pv_end = data[0].pv_end | default('17:00') %}
-  {% set pv_start = data[0].pv_start | default('05:30') %}
-  {% set end_min = (pv_end.split(':')[0] | int) * 60 + (pv_end.split(':')[1] | int) %}
-  {% set start_min = (pv_start.split(':')[0] | int) * 60 + (pv_start.split(':')[1] | int) %}
+  {# --- 0. NIGHT-CHECK: 0.0 only after local sunset until local midnight.               #}
+  {# Between local midnight and sunrise, SQL provides full-day forecast; show it.        #}
+  {# pv_end is UTC HH:MM from SQL → convert to local minutes for correct comparison.    #}
   {% set offset_min = (now().utcoffset().total_seconds() / 60) | int %}
-  {% set midnight_utc_min = (24 * 60 - offset_min) % (24 * 60) %}
+  {% set pv_end_utc = data[0].pv_end | default('17:30') %}
+  {% set end_min_local = ((pv_end_utc.split(':')[0] | int) * 60 + (pv_end_utc.split(':')[1] | int) + offset_min) % 1440 %}
 
-  {% if (end_min <= now_min < midnight_utc_min) or now_min < start_min %}
+  {% if (now().hour * 60 + now().minute) > end_min_local %}
     0.0
   {% else %}
 

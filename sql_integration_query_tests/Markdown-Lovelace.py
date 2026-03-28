@@ -15,8 +15,11 @@
   {% if data | length > 0 %}
     {% set f_avg = data[0].f_avg_today_remaining | float(default=50.0) %}
 
-    {# 0. NIGHT-CHECK: delegate to HA sun entity — exact, DST-safe, timezone-agnostic #}
-    {% set is_night = states('sun.sun') == 'below_horizon' %}
+    {# 0. NIGHT-CHECK: 0.0 only after local sunset until midnight. Midnight→sunrise: full-day forecast. #}
+    {% set offset_min = (now().utcoffset().total_seconds() / 60) | int %}
+    {% set pv_end_utc = data[0].pv_end | default('17:30') %}
+    {% set end_min_local = ((pv_end_utc.split(':')[0] | int) * 60 + (pv_end_utc.split(':')[1] | int) + offset_min) % 1440 %}
+    {% set is_night = (now().hour * 60 + now().minute) > end_min_local %}
 
     {# 1. SEASONAL SNOW DETECTION (Dec / Jan / Feb) #}
     {% set current_month = now().month %}

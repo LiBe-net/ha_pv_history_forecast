@@ -168,14 +168,10 @@ SELECT json_group_array(
         'f_avg_today_remaining', (SELECT ROUND(f_avg, 1) FROM forecast_val),        
         'f_avg_tomorrow', (SELECT ROUND(f_avg_tomorrow, 1) FROM forecast_next_day),
         'h_avg_total', ROUND(h_avg_total_val, 1),
-        'h_avg_remaining', ROUND(h_avg_rest_val, 1),
+        /* COALESCE: before sunrise h_avg_rest_val is NULL (UTC window '23:xx'..'17:xx' empty) */
+        /* Fall back to h_avg_total_val so Jinja cloud-matching works correctly at midnight.   */
+        'h_avg_remaining', ROUND(COALESCE(h_avg_rest_val, h_avg_total_val), 1),
         'yield_day_total', ROUND(day_max - day_min, 2),
-        -- Dreistufige Logik für den Restertrag (Phasenerkennung in LOKALZEIT!):
-        -- Lokale Zeit verwenden, da UTC-Vergleich zwischen lok. Mitternacht (= 23:00 UTC CET)
-        -- und 00:00 UTC fälschlich '23:xx' > sun_end '17:32' → 0.0 liefert.
-        -- 1. Nach lok. Sonnenuntergang: 0.0
-        -- 2. Vor lok. Sonnenaufgang (inkl. Mitternacht lokal): Gesamter Tagesertrag als Prognose.
-        -- 3. Im PV-Fenster: Verbleibender Restertrag ab jetzt.
         'yield_day_remaining', ROUND(CASE
             WHEN strftime('%H:%M', 'now', (SELECT offset FROM vars)) > (SELECT sun_end_local   FROM pv_activity)
                 THEN 0.0

@@ -1,14 +1,11 @@
 {% set raw_json = state_attr('sensor.pv_remaining_states', 'json') %}
 {% if raw_json and raw_json != '[]' and raw_json is not none %}
   {% set data = raw_json | from_json %}
-  {% set now_min = utcnow().hour * 60 + utcnow().minute %}
-  {% set pv_end = data[0].pv_end | default('17:00') %}
-  {% set pv_start = data[0].pv_start | default('05:30') %}
-  {% set end_min = (pv_end.split(':')[0] | int) * 60 + (pv_end.split(':')[1] | int) %}
-  {% set start_min = (pv_start.split(':')[0] | int) * 60 + (pv_start.split(':')[1] | int) %}
+  {# Night check: 0.0 after local sunset until midnight; midnight→sunrise shows full-day forecast #}
   {% set offset_min = (now().utcoffset().total_seconds() / 60) | int %}
-  {% set midnight_utc_min = (24 * 60 - offset_min) % (24 * 60) %}
-  {% if (end_min <= now_min < midnight_utc_min) or now_min < start_min %}
+  {% set pv_end_utc = data[0].pv_end | default('17:30') %}
+  {% set end_min_local = ((pv_end_utc.split(':')[0] | int) * 60 + (pv_end_utc.split(':')[1] | int) + offset_min) % 1440 %}
+  {% if (now().hour * 60 + now().minute) > end_min_local %}
     0.0
   {% else %}
     {% set f_avg = data[0].f_avg_today_remaining | float(default=50.0) %}
