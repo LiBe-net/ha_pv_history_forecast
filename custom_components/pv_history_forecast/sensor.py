@@ -220,7 +220,8 @@ def _handle_options_update(
 
 
 class SQLPVForecastSensor(SensorEntity):
-        _last_update_time: datetime | None = None
+
+    _last_update_time: datetime | None = None
     """SQL PV Forecast Sensor Entity."""
 
     _attr_icon = "mdi:database"
