@@ -220,6 +220,7 @@ def _handle_options_update(
 
 
 class SQLPVForecastSensor(SensorEntity):
+        _last_update_time: datetime | None = None
     """SQL PV Forecast Sensor Entity."""
 
     _attr_icon = "mdi:database"
@@ -316,7 +317,13 @@ FROM vars
             self._available = False
 
     async def async_update(self) -> None:
-        """Update the sensor."""
+        """Update the sensor only if last update was more than 5 minutes ago."""
+        now = datetime.now()
+        if self._last_update_time is not None:
+            elapsed = now - self._last_update_time
+            if elapsed < timedelta(minutes=5):
+                #_LOGGER.debug("SQLPVForecastSensor: Skipping update, only %s since last update", elapsed)
+                return
         try:
             # Lazy-init DB engine in executor (blocking call)
             if self._engine is None:
@@ -376,6 +383,8 @@ FROM vars
                 _LOGGER.warning("SQL query returned no rows")
                 self._raw_data = None
                 self._attr_available = False
+
+            self._last_update_time = now
 
         except Exception as err:
             _LOGGER.error("Error updating sensor: %s", err)
