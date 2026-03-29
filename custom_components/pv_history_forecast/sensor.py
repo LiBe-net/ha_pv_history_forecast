@@ -93,48 +93,56 @@ async def async_setup_entry(
         # Fallback to stored query if format fails (custom SQL)
         sql_query = data.get("sql_query")
 
-    # Main SQL sensor: runs the query, stores raw JSON + lovelace_card in attributes
-    sql_sensor = SQLPVForecastSensor(
+    # SQL JSON sensor: runs the query every 15 min, stores raw JSON + lovelace_card in attributes
+    sql_sensor = SQLJsonSensor(
         hass=hass,
         config_entry=config_entry,
-        name=f"{prefix}_remaining_today",
+        name=f"{prefix}_json",
         db_url=data.get(CONF_DB_URL),
         sensor_clouds=sensor_clouds,
         sensor_pv=sensor_pv,
         sensor_forecast=sensor_forecast,
         pv_history_days=history_days,
-        value_template=options.get(CONF_VALUE_TEMPLATE, DEFAULT_VALUE_TEMPLATE),
-        unit_of_measurement=options.get(CONF_UNIT_OF_MEASUREMENT, DEFAULT_UNIT_OF_MEASUREMENT),
-        device_class=options.get(CONF_DEVICE_CLASS, DEFAULT_DEVICE_CLASS),
-        state_class=options.get(CONF_STATE_CLASS, DEFAULT_STATE_CLASS),
         sql_query=sql_query,
         lovelace_template_str=lovelace_template_str,
         lovelace_today_str=lovelace_today_str,
         lovelace_tomorrow_str=lovelace_tomorrow_str,
     )
 
-    main_entity_id = f"sensor.{prefix}_remaining_today"
+    json_entity_id = f"sensor.{prefix}_json"
 
-    # Derived sensors: read raw JSON from main sensor, apply different templates
+    # Energy remaining today: reads raw JSON from SQL sensor, applies value template + EMA
+    energy_today_sensor = PVForecastEnergySensor(
+        hass=hass,
+        config_entry=config_entry,
+        main_entity_id=json_entity_id,
+        name=f"{prefix}_energy_remaining_today",
+        value_template=options.get(CONF_VALUE_TEMPLATE, DEFAULT_VALUE_TEMPLATE),
+        unit_of_measurement=options.get(CONF_UNIT_OF_MEASUREMENT, DEFAULT_UNIT_OF_MEASUREMENT),
+        device_class=options.get(CONF_DEVICE_CLASS, DEFAULT_DEVICE_CLASS),
+        state_class=options.get(CONF_STATE_CLASS, DEFAULT_STATE_CLASS),
+    )
+
+    # Derived sensors: read raw JSON from SQL sensor, apply different templates
     min_sensor = PVForecastTemplateSensor(
         hass=hass,
         config_entry=config_entry,
-        main_entity_id=main_entity_id,
-        name=f"{prefix}_remaining_min",
+        main_entity_id=json_entity_id,
+        name=f"{prefix}_energy_remaining_today_min",
         value_template=DEFAULT_VALUE_TEMPLATE_MIN,
     )
     max_sensor = PVForecastTemplateSensor(
         hass=hass,
         config_entry=config_entry,
-        main_entity_id=main_entity_id,
-        name=f"{prefix}_remaining_max",
+        main_entity_id=json_entity_id,
+        name=f"{prefix}_energy_remaining_today_max",
         value_template=DEFAULT_VALUE_TEMPLATE_MAX,
     )
     tomorrow_sensor = PVForecastTemplateSensor(
         hass=hass,
         config_entry=config_entry,
-        main_entity_id=main_entity_id,
-        name=f"{prefix}_tomorrow",
+        main_entity_id=json_entity_id,
+        name=f"{prefix}_energy_tomorrow",
         value_template=DEFAULT_VALUE_TEMPLATE_TOMORROW,
     )
 
@@ -149,33 +157,33 @@ async def async_setup_entry(
     cloud_today_sensor = CloudForecastSensor(
         hass=hass,
         config_entry=config_entry,
-        main_entity_id=main_entity_id,
+        main_entity_id=json_entity_id,
         name=f"{prefix}_cloud_remaining_today",
         json_field="f_avg_today_remaining",
     )
     cloud_tomorrow_sensor = CloudForecastSensor(
         hass=hass,
         config_entry=config_entry,
-        main_entity_id=main_entity_id,
+        main_entity_id=json_entity_id,
         name=f"{prefix}_cloud_tomorrow",
         json_field="f_avg_tomorrow",
     )
     method_today_sensor = ForecastMethodSensor(
         hass=hass,
         config_entry=config_entry,
-        main_entity_id=main_entity_id,
+        main_entity_id=json_entity_id,
         name=f"{prefix}_method_remaining_today",
         value_template=DEFAULT_VALUE_TEMPLATE_METHOD_TODAY,
     )
     method_tomorrow_sensor = ForecastMethodSensor(
         hass=hass,
         config_entry=config_entry,
-        main_entity_id=main_entity_id,
+        main_entity_id=json_entity_id,
         name=f"{prefix}_method_tomorrow",
         value_template=DEFAULT_VALUE_TEMPLATE_METHOD_TOMORROW,
     )
 
-    entities = [sql_sensor, min_sensor, max_sensor, tomorrow_sensor, cloud_today_sensor, cloud_tomorrow_sensor, method_today_sensor, method_tomorrow_sensor]
+    entities = [sql_sensor, energy_today_sensor, min_sensor, max_sensor, tomorrow_sensor, cloud_today_sensor, cloud_tomorrow_sensor, method_today_sensor, method_tomorrow_sensor]
 
     # Create dedicated cloud coverage sensor when no external sensor is configured.
     # Mirrors cloud_coverage from the weather entity so HA accumulates LTS statistics.
@@ -199,7 +207,7 @@ async def async_setup_entry(
 def _handle_options_update(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
-    sensor: SQLPVForecastSensor,
+    sensor: SQLJsonSensor,
 ) -> None:
     """Handle option updates."""
     options = config_entry.options or {}
@@ -209,20 +217,22 @@ def _handle_options_update(
     sensor._sensor_pv = options.get(CONF_SENSOR_PV, data.get(CONF_SENSOR_PV))
     sensor._sensor_forecast = options.get(CONF_SENSOR_FORECAST, data.get(CONF_SENSOR_FORECAST))
     sensor._pv_history_days = options.get(CONF_PV_HISTORY_DAYS, data.get(CONF_PV_HISTORY_DAYS, 30))
-    sensor._unit_of_measurement = options.get(CONF_UNIT_OF_MEASUREMENT, DEFAULT_UNIT_OF_MEASUREMENT)
-    sensor._device_class = options.get(CONF_DEVICE_CLASS, DEFAULT_DEVICE_CLASS)
-    sensor._state_class = options.get(CONF_STATE_CLASS, DEFAULT_STATE_CLASS)
-    sensor._value_template_str = options.get(CONF_VALUE_TEMPLATE, DEFAULT_VALUE_TEMPLATE)
 
     # Rebuild SQL query
     sensor._rebuild_sql_query()
     sensor.async_write_ha_state()
 
 
-class SQLPVForecastSensor(SensorEntity):
-    """SQL PV Forecast Sensor Entity."""
+class SQLJsonSensor(SensorEntity):
+    """SQL JSON Sensor — runs the forecast query and caches the raw result.
+
+    State is the number of matching historical days found by the query.
+    All derived energy / cloud / method sensors read the ``sql_raw_json``
+    attribute produced here instead of running their own SQL.
+    """
 
     _attr_icon = "mdi:database"
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(
         self,
@@ -234,10 +244,6 @@ class SQLPVForecastSensor(SensorEntity):
         sensor_pv: str,
         sensor_forecast: str,
         pv_history_days: int,
-        value_template: str,
-        unit_of_measurement: str,
-        device_class: str,
-        state_class: str,
         sql_query: str | None = None,
         lovelace_template_str: str | None = None,
         lovelace_today_str: str | None = None,
@@ -251,12 +257,8 @@ class SQLPVForecastSensor(SensorEntity):
         self._sensor_pv = sensor_pv
         self._sensor_forecast = sensor_forecast
         self._pv_history_days = pv_history_days
-        self._value_template_str = value_template
         self._attr_name = name
         self._attr_unique_id = f"{DOMAIN}_{config_entry.entry_id}"
-        self._attr_native_unit_of_measurement = unit_of_measurement
-        self._attr_device_class = device_class or None
-        self._attr_state_class = state_class or None
         self._attr_native_value = None
         self._attr_available = True
         self._raw_data: list | None = None
@@ -306,7 +308,7 @@ SELECT json_object(
 FROM vars
                 """
                 self._sql_query = text(query_str)
-            
+
             _LOGGER.debug(
                 "SQL Query rebuilt with sensors: clouds=%s, pv=%s, forecast=%s",
                 self._sensor_clouds, self._sensor_pv, self._sensor_forecast
@@ -332,23 +334,8 @@ FROM vars
                 except (ValueError, TypeError) as e:
                     _LOGGER.error("Failed to parse SQL result as JSON: %s — raw: %s", e, result[:200])
                     self._raw_data = None
-                new_val = self._apply_template(result)
-                # Adaptive EMA: smooth small jumps (hourly stat boundary), pass large changes through fast
-                if new_val is not None and self._attr_native_value is not None:
-                    try:
-                        new_f = float(new_val)
-                        old_f = float(self._attr_native_value)
-                        if old_f > 0:
-                            rel_change = abs(new_f - old_f) / old_f
-                            # alpha ramps linearly from 0.3 (no change) to 1.0 (≥30% change)
-                            alpha = min(1.0, 0.3 + rel_change * 2.33)
-                            self._attr_native_value = round(alpha * new_f + (1.0 - alpha) * old_f, 3)
-                        else:
-                            self._attr_native_value = new_val
-                    except (ValueError, TypeError):
-                        self._attr_native_value = new_val
-                else:
-                    self._attr_native_value = new_val
+                # State = number of matching historical days
+                self._attr_native_value = len(self._raw_data) if isinstance(self._raw_data, list) else 0
                 # Render Lovelace card with fresh SQL data passed as direct variable
                 if self._lovelace_template_str:
                     try:
@@ -375,6 +362,7 @@ FROM vars
             else:
                 _LOGGER.warning("SQL query returned no rows")
                 self._raw_data = None
+                self._attr_native_value = 0
                 self._attr_available = False
 
         except Exception as err:
@@ -394,22 +382,6 @@ FROM vars
             if row and row[0] is not None:
                 return str(row[0])
         return None
-
-    def _apply_template(self, raw_value: str) -> float | str | None:
-        """Apply value template to the raw SQL result string."""
-        try:
-            template = Template(self._value_template_str, self.hass)
-            rendered = template.async_render({
-                "value": raw_value,
-                "latitude": self.hass.config.latitude,
-            })
-            try:
-                return float(rendered)
-            except (ValueError, TypeError):
-                return str(rendered)
-        except Exception as err:
-            _LOGGER.error("Failed to apply template: %s", err)
-            return None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -454,10 +426,96 @@ FROM vars
         return timedelta(minutes=5)
 
 
+class PVForecastEnergySensor(SensorEntity):
+    """Energy remaining-today sensor with adaptive EMA smoothing.
+
+    Reads the raw SQL JSON produced by SQLJsonSensor and applies the
+    configured value template.  An adaptive EMA smooths out small
+    hour-boundary jumps while letting large corrections pass through fast.
+    """
+
+    _attr_icon = "mdi:solar-panel"
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        config_entry: ConfigEntry,
+        main_entity_id: str,
+        name: str,
+        value_template: str,
+        unit_of_measurement: str,
+        device_class: str,
+        state_class: str,
+    ) -> None:
+        """Initialize the energy sensor."""
+        self.hass = hass
+        self.config_entry = config_entry
+        self._main_entity_id = main_entity_id
+        self._value_template_str = value_template
+        self._attr_name = name
+        self._attr_unique_id = f"{DOMAIN}_{config_entry.entry_id}_energy_remaining_today"
+        self._attr_native_unit_of_measurement = unit_of_measurement
+        self._attr_device_class = device_class or None
+        self._attr_state_class = state_class or None
+        self._attr_native_value = None
+        self._attr_available = False
+        self.entity_id = generate_entity_id("sensor.{}", name, hass=hass)
+
+    async def async_update(self) -> None:
+        """Update by reading raw JSON from the SQL sensor's attributes."""
+        main_state = self.hass.states.get(self._main_entity_id)
+        if main_state is None or not main_state.attributes.get("sql_raw_json"):
+            self._attr_available = False
+            return
+        raw = main_state.attributes["sql_raw_json"]
+        new_val = self._apply_template(raw)
+        # Adaptive EMA: smooth small jumps (hourly stat boundary), pass large changes through fast
+        if new_val is not None and self._attr_native_value is not None:
+            try:
+                new_f = float(new_val)
+                old_f = float(self._attr_native_value)
+                if old_f > 0:
+                    rel_change = abs(new_f - old_f) / old_f
+                    # alpha ramps linearly from 0.3 (no change) to 1.0 (≥30% change)
+                    alpha = min(1.0, 0.3 + rel_change * 2.33)
+                    self._attr_native_value = round(alpha * new_f + (1.0 - alpha) * old_f, 3)
+                else:
+                    self._attr_native_value = new_val
+            except (ValueError, TypeError):
+                self._attr_native_value = new_val
+        else:
+            self._attr_native_value = new_val
+        self._attr_available = self._attr_native_value is not None
+
+    def _apply_template(self, raw_value: str) -> float | str | None:
+        """Apply value template with latitude variable."""
+        try:
+            template = Template(self._value_template_str, self.hass)
+            rendered = template.async_render({
+                "value": raw_value,
+                "latitude": self.hass.config.latitude,
+            })
+            try:
+                return float(rendered)
+            except (ValueError, TypeError):
+                return str(rendered)
+        except Exception as err:
+            _LOGGER.error("Failed to apply template for %s: %s", self._attr_name, err)
+            return None
+
+    @property
+    def should_poll(self) -> bool:
+        return True
+
+    @property
+    def update_interval(self) -> timedelta | None:
+        return timedelta(minutes=5)
+
+
 class PVForecastTemplateSensor(SensorEntity):
     """Derived PV forecast sensor.
 
-    Reads the raw SQL JSON cached by the main SQLPVForecastSensor and applies
+    Reads the raw SQL JSON cached by the SQLJsonSensor and applies
     a dedicated Jinja2 template (min / max / tomorrow) without running a
     second SQL query.
     """
@@ -575,7 +633,7 @@ class ForecastMethodSensor(SensorEntity):
 
     @property
     def update_interval(self) -> timedelta | None:
-        return timedelta(minutes=15)
+        return timedelta(minutes=5)
 
 
 class WeatherForecastSensor(CoordinatorEntity, SensorEntity):
