@@ -285,7 +285,7 @@ DEFAULT_VALUE_TEMPLATE_METHOD_TODAY = """{#- Return the decision method used for
   {% else %}No data
   {% endif %}
 {% else %}No data
-{% endif %}
+{% endif %}"""
 
 DEFAULT_VALUE_TEMPLATE_METHOD_TOMORROW = """{#- Return the decision method used for tomorrow forecast -#}
 {% set raw = value %}
@@ -313,7 +313,7 @@ DEFAULT_VALUE_TEMPLATE_METHOD_TOMORROW = """{#- Return the decision method used 
   {% else %}No data
   {% endif %}
 {% else %}No data
-{% endif %}
+{% endif %}"""
 
 DEFAULT_UNIT_OF_MEASUREMENT = "kWh"
 DEFAULT_DEVICE_CLASS = "energy"
