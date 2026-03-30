@@ -259,15 +259,11 @@ DEFAULT_VALUE_TEMPLATE_METHOD_TODAY = """{#- Return the decision method used for
 {% set raw = value %}
 {% if raw and raw != '[]' and raw is not none %}
   {% set data = raw | from_json %}
-  {% set data_len = data | length %}
-  {% set truncated = data_len > 15 %}
-  {% set data_show = data[:15] if truncated else data %}
-  {% if data_len > 0 %}
-    {% if truncated %}Info: showing 15 out of {{ data_len }} days. {% endif %}
-    {% set f_avg = data_show[0].f_avg_today_remaining | float(default=50.0) %}
+  {% if data | length > 0 %}
+    {% set f_avg = data[0].f_avg_today_remaining | float(default=50.0) %}
     {% set current_month = now().month %}
     {% set ns_pool = namespace(items=[]) %}
-    {% for item in data_show %}
+    {% for item in data %}
       {% set yield_raw = item.yield_day_remaining | float(default=0) %}
       {% set clouds = item.h_avg_remaining | float(default=0) %}
       {% if yield_raw > 0.05 or clouds > 95 or current_month in [12, 1, 2] %}
@@ -285,20 +281,16 @@ DEFAULT_VALUE_TEMPLATE_METHOD_TODAY = """{#- Return the decision method used for
   {% else %}No data
   {% endif %}
 {% else %}No data
-{% endif %}
+{% endif %}"""
 
 DEFAULT_VALUE_TEMPLATE_METHOD_TOMORROW = """{#- Return the decision method used for tomorrow forecast -#}
 {% set raw = value %}
 {% if raw and raw != '[]' and raw is not none %}
   {% set data = raw | from_json %}
-  {% set data_len = data | length %}
-  {% set truncated = data_len > 15 %}
-  {% set data_show = data[:15] if truncated else data %}
-  {% if data_len > 0 %}
-    {% if truncated %}Info: showing 15 out of {{ data_len }} days. {% endif %}
-    {% set f_avg_tomorrow = data_show[0].f_avg_tomorrow | float(default=50.0) %}
+  {% if data | length > 0 %}
+    {% set f_avg_tomorrow = data[0].f_avg_tomorrow | float(default=50.0) %}
     {% set ns_pool = namespace(items=[]) %}
-    {% for item in data_show %}
+    {% for item in data %}
       {% set clouds_hist = item.h_avg_total | float(default=0) %}
       {% set ns_pool.items = ns_pool.items + [{'h_avg': clouds_hist}] %}
     {% endfor %}
@@ -313,7 +305,7 @@ DEFAULT_VALUE_TEMPLATE_METHOD_TOMORROW = """{#- Return the decision method used 
   {% else %}No data
   {% endif %}
 {% else %}No data
-{% endif %}
+{% endif %}"""
 
 DEFAULT_UNIT_OF_MEASUREMENT = "kWh"
 DEFAULT_DEVICE_CLASS = "energy"
