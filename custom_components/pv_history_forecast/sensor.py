@@ -39,7 +39,6 @@ from .const import (
     DEFAULT_VALUE_TEMPLATE_TOMORROW,
     DEFAULT_VALUE_TEMPLATE_METHOD_TODAY,
     DEFAULT_VALUE_TEMPLATE_METHOD_TOMORROW,
-    DEFAULT_LOVELACE_TEMPLATE,
     DEFAULT_LOVELACE_TEMPLATE_REMAINING_TODAY,
     DEFAULT_LOVELACE_TEMPLATE_TOMORROW,
     DEFAULT_SQL_QUERY,
@@ -69,7 +68,6 @@ async def async_setup_entry(
 
     # Pre-build Lovelace templates (substitute forecast sensor once at setup)
     forecast_entity_id = data.get(CONF_SENSOR_FORECAST, f"sensor.{prefix}_weather_forecast")
-    lovelace_template_str = DEFAULT_LOVELACE_TEMPLATE.replace("__FORECAST_SENSOR__", forecast_entity_id)
     lovelace_today_str = DEFAULT_LOVELACE_TEMPLATE_REMAINING_TODAY
     lovelace_tomorrow_str = DEFAULT_LOVELACE_TEMPLATE_TOMORROW
 
@@ -108,7 +106,6 @@ async def async_setup_entry(
         device_class=options.get(CONF_DEVICE_CLASS, DEFAULT_DEVICE_CLASS),
         state_class=options.get(CONF_STATE_CLASS, DEFAULT_STATE_CLASS),
         sql_query=sql_query,
-        lovelace_template_str=lovelace_template_str,
         lovelace_today_str=lovelace_today_str,
         lovelace_tomorrow_str=lovelace_tomorrow_str,
     )
@@ -241,7 +238,6 @@ class SQLPVForecastSensor(SensorEntity):
         device_class: str,
         state_class: str,
         sql_query: str | None = None,
-        lovelace_template_str: str | None = None,
         lovelace_today_str: str | None = None,
         lovelace_tomorrow_str: str | None = None,
     ) -> None:
@@ -263,10 +259,8 @@ class SQLPVForecastSensor(SensorEntity):
         self._attr_available = True
         self._raw_data: list | None = None
         self._last_raw_result: str | None = None
-        self._lovelace_card: str | None = None
         self._lovelace_card_remaining_today: str | None = None
         self._lovelace_card_tomorrow: str | None = None
-        self._lovelace_template_str = lovelace_template_str
         self._lovelace_today_str = lovelace_today_str
         self._lovelace_tomorrow_str = lovelace_tomorrow_str
         self._sql_query_template = sql_query
@@ -358,13 +352,6 @@ FROM vars
                 else:
                     self._attr_native_value = new_val
                 # Render Lovelace card with fresh SQL data passed as direct variable
-                if self._lovelace_template_str:
-                    try:
-                        tmpl = Template(self._lovelace_template_str, self.hass)
-                        self._lovelace_card = str(tmpl.async_render({"raw_json": result}))
-                    except Exception as lovelace_err:
-                        _LOGGER.error("Failed to render lovelace_card: %s", lovelace_err)
-                        self._lovelace_card = None
                 if self._lovelace_today_str:
                     try:
                         tmpl = Template(self._lovelace_today_str, self.hass)
@@ -432,20 +419,12 @@ FROM vars
         }
         if self._last_raw_result is not None:
             attrs["sql_raw_json"] = self._last_raw_result
-        if self._lovelace_card is not None:
-            attrs["lovelace_card"] = self._lovelace_card
         if self._lovelace_card_remaining_today is not None:
             attrs["lovelace_card_remaining_today"] = self._lovelace_card_remaining_today
         if self._lovelace_card_tomorrow is not None:
             attrs["lovelace_card_tomorrow"] = self._lovelace_card_tomorrow
         rows = self._raw_data if isinstance(self._raw_data, list) else []
         attrs["matching_days_count"] = len(rows)
-        if rows:
-            # Flatten first (best-matching) row's fields directly as top-level attrs
-            first = rows[0]
-            if isinstance(first, dict):
-                attrs.update(first)
-            attrs["matching_days"] = rows
         return attrs
 
     @property

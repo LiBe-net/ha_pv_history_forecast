@@ -41,7 +41,7 @@
   {# --- 4. FORECAST CALCULATION --- #}
   {% set pool = ns_pool.items %}
   {% set brighter = pool | selectattr('h_avg', 'le', f_avg_tomorrow) | list %}
-  {% set darker = pool | selectattr('h_avg', 'gt', f_avg_tomorrow) | list %}
+  {% set darker = pool | selectattr('h_avg', 'ge', f_avg_tomorrow) | list %}
   {% set res = 0 %}
 
   {% if brighter | count > 0 and darker | count == 0 %}
