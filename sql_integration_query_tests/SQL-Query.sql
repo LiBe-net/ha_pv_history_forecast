@@ -95,8 +95,26 @@ forecast_val AS (
                              THEN strftime('%H:%M', 'now')
                          ELSE (SELECT sun_start FROM pv_activity)
                        END
-               AND (SELECT sun_end FROM pv_activity)
-        ), 50.0) as f_avg
+             AND (SELECT sun_end FROM pv_activity)
+         ), 50.0) as f_avg,
+         COALESCE(
+         (SELECT AVG(CAST(json_extract(f.value, '$.uv_index') AS FLOAT)) 
+          FROM states s 
+          JOIN state_attributes a ON s.attributes_id = a.attributes_id, 
+          json_each(a.shared_attrs, '$.forecast') f 
+          WHERE s.metadata_id = (SELECT f_id FROM ids) 
+            AND s.last_updated_ts = (SELECT MAX(last_updated_ts) FROM states WHERE metadata_id = (SELECT f_id FROM ids)) 
+            AND substr(json_extract(f.value, '$.datetime'), 1, 10) = date('now', (SELECT offset FROM vars))
+            AND substr(json_extract(f.value, '$.datetime'), 12, 5) 
+             BETWEEN CASE
+                    WHEN strftime('%H:%M', 'now', (SELECT offset FROM vars))
+                      BETWEEN (SELECT sun_start_local FROM pv_activity)
+                          AND (SELECT sun_end_local   FROM pv_activity)
+                     THEN strftime('%H:%M', 'now')
+                    ELSE (SELECT sun_start FROM pv_activity)
+                  END
+             AND (SELECT sun_end FROM pv_activity)
+         ), 0.0) as uv_avg
 ),
 
 forecast_next_day AS (
@@ -109,13 +127,23 @@ forecast_next_day AS (
         WHERE s.metadata_id = (SELECT f_id FROM ids) 
           AND s.last_updated_ts = (SELECT MAX(last_updated_ts) FROM states WHERE metadata_id = (SELECT f_id FROM ids)) 
           AND substr(json_extract(f.value, '$.datetime'), 1, 10) = date('now', (SELECT offset FROM vars), '+1 day') 
-          AND substr(json_extract(f.value, '$.datetime'), 12, 5) BETWEEN (SELECT sun_start FROM pv_activity) AND (SELECT sun_end FROM pv_activity)
-    ), 50.0) as f_avg_tomorrow
+            AND substr(json_extract(f.value, '$.datetime'), 12, 5) BETWEEN (SELECT sun_start FROM pv_activity) AND (SELECT sun_end FROM pv_activity)
+        ), 50.0) as f_avg_tomorrow,
+        COALESCE((
+          SELECT AVG(CAST(json_extract(f.value, '$.uv_index') AS FLOAT)) 
+          FROM states s 
+          JOIN state_attributes a ON s.attributes_id = a.attributes_id, 
+          json_each(a.shared_attrs, '$.forecast') f 
+          WHERE s.metadata_id = (SELECT f_id FROM ids) 
+            AND s.last_updated_ts = (SELECT MAX(last_updated_ts) FROM states WHERE metadata_id = (SELECT f_id FROM ids)) 
+            AND substr(json_extract(f.value, '$.datetime'), 1, 10) = date('now', (SELECT offset FROM vars), '+1 day') 
+            AND substr(json_extract(f.value, '$.datetime'), 12, 5) BETWEEN (SELECT sun_start FROM pv_activity) AND (SELECT sun_end FROM pv_activity)
+        ), 0.0) as uv_avg_tomorrow
 ),
 
 cloud_history AS (
     /* Kombiniert Langzeit-Statistiken und kurzfristige States der Bewölkung für den historischen Vergleich */
-    SELECT start_ts as ts, CAST(COALESCE(mean, state) AS FLOAT) as val 
+        SELECT start_ts as ts, CAST(COALESCE(mean, state) AS FLOAT) as val, CAST(COALESCE(mean, state) AS FLOAT) as uv_val
     FROM statistics 
     WHERE metadata_id = (SELECT w_id_stats FROM ids) 
       AND start_ts > strftime('%s', 'now', '-60 days')
@@ -124,7 +152,11 @@ cloud_history AS (
       CASE WHEN (SELECT sensor_clouds FROM vars) LIKE 'weather.%' 
            THEN CAST(json_extract(a.shared_attrs, '$.cloud_coverage') AS FLOAT) 
            ELSE CAST(s.state AS FLOAT) 
-      END as val 
+            END as val,
+            CASE WHEN (SELECT sensor_clouds FROM vars) LIKE 'weather.%' 
+                     THEN CAST(json_extract(a.shared_attrs, '$.uv_index') AS FLOAT) 
+                     ELSE CAST(s.state AS FLOAT) 
+            END as uv_val
     FROM states s 
     LEFT JOIN state_attributes a ON s.attributes_id = a.attributes_id 
     WHERE s.metadata_id = (SELECT w_id_states FROM ids) 
@@ -138,7 +170,9 @@ matching_days AS (
     SELECT 
         date(ts, 'unixepoch') as day, 
         AVG(CASE WHEN strftime('%H:%M', ts, 'unixepoch') BETWEEN (SELECT sun_start FROM pv_activity) AND (SELECT sun_end FROM pv_activity) THEN val END) as h_avg_total_val,
-        AVG(CASE WHEN strftime('%H:%M', ts, 'unixepoch') >= strftime('%H:00', 'now') AND strftime('%H:%M', ts, 'unixepoch') <= (SELECT sun_end FROM pv_activity) THEN val END) as h_avg_rest_val
+        AVG(CASE WHEN strftime('%H:%M', ts, 'unixepoch') >= strftime('%H:00', 'now') AND strftime('%H:%M', ts, 'unixepoch') <= (SELECT sun_end FROM pv_activity) THEN val END) as h_avg_rest_val,
+        AVG(CASE WHEN strftime('%H:%M', ts, 'unixepoch') BETWEEN (SELECT sun_start FROM pv_activity) AND (SELECT sun_end FROM pv_activity) THEN uv_val END) as uv_avg_total_val,
+        AVG(CASE WHEN strftime('%H:%M', ts, 'unixepoch') >= strftime('%H:00', 'now') AND strftime('%H:%M', ts, 'unixepoch') <= (SELECT sun_end FROM pv_activity) THEN uv_val END) as uv_avg_rest_val
     FROM cloud_history 
     -- Filtert die Historie: Alles vor dem heutigen lokalen Tag (Offset-gesteuert)
     WHERE date(ts, 'unixepoch') < date('now', (SELECT offset FROM vars)) 
@@ -167,10 +201,14 @@ SELECT json_group_array(
         'date', day,
         'f_avg_today_remaining', (SELECT ROUND(f_avg, 1) FROM forecast_val),        
         'f_avg_tomorrow', (SELECT ROUND(f_avg_tomorrow, 1) FROM forecast_next_day),
+        'uv_avg_today_remaining', (SELECT ROUND(uv_avg, 1) FROM forecast_val),
+        'uv_avg_tomorrow', (SELECT ROUND(uv_avg_tomorrow, 1) FROM forecast_next_day),
         'h_avg_total', ROUND(h_avg_total_val, 1),
         /* COALESCE: before sunrise h_avg_rest_val is NULL (UTC window '23:xx'..'17:xx' empty) */
         /* Fall back to h_avg_total_val so Jinja cloud-matching works correctly at midnight.   */
         'h_avg_remaining', ROUND(COALESCE(h_avg_rest_val, h_avg_total_val), 1),
+        'uv_avg_total', ROUND(uv_avg_total_val, 1),
+        'uv_avg_remaining', ROUND(COALESCE(uv_avg_rest_val, uv_avg_total_val), 1),
         'yield_day_total', ROUND(day_max - day_min, 2),
         'yield_day_remaining', ROUND(CASE
             WHEN strftime('%H:%M', 'now', (SELECT offset FROM vars)) > (SELECT sun_end_local   FROM pv_activity)

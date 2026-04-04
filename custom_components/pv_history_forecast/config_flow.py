@@ -17,6 +17,7 @@ from .const import (
     CONF_SENSOR_CLOUDS,
     CONF_SENSOR_FORECAST,
     CONF_SENSOR_PV,
+    CONF_SENSOR_UV,
     CONF_WEATHER_ENTITY,
     CONF_VALUE_TEMPLATE,
     CONF_UNIT_OF_MEASUREMENT,
@@ -42,6 +43,19 @@ def _get_percent_sensor_ids(hass) -> list[str]:
         if s.attributes.get("unit_of_measurement") == "%"
         and s.state not in ("unknown", "unavailable", "")
     ]
+
+
+def _get_uv_sensor_ids(hass) -> list[str]:
+    """Return sensor entity_ids that look like UV index sensors."""
+    uv_units = {"UV index", "UVI", "uv"}
+    result = []
+    for s in hass.states.async_all("sensor"):
+        unit = (s.attributes.get("unit_of_measurement") or "").lower()
+        name = s.entity_id.lower()
+        if unit in {u.lower() for u in uv_units} or "uv" in name:
+            if s.state not in ("unknown", "unavailable", ""):
+                result.append(s.entity_id)
+    return result
 
 
 def _get_energy_sensor_ids(hass) -> list[str]:
@@ -121,7 +135,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             weather_entity = user_input.get(CONF_WEATHER_ENTITY, "").strip()
             sensor_pv = user_input.get(CONF_SENSOR_PV, "").strip()
             sensor_clouds = (user_input.get(CONF_SENSOR_CLOUDS) or "").strip()
-            
+            sensor_uv = (user_input.get(CONF_SENSOR_UV) or "").strip()
+
             # Validiere Weather Entity
             if not weather_entity:
                 errors["base"] = "weather_entity_required"
@@ -137,6 +152,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # Validiere Cloud Sensor wenn angegeben
             if sensor_clouds and not sensor_clouds.startswith("sensor."):
                 errors[CONF_SENSOR_CLOUDS] = "must_be_sensor_entity"
+
+            # Validiere UV Sensor wenn angegeben
+            if sensor_uv and not sensor_uv.startswith("sensor."):
+                errors[CONF_SENSOR_UV] = "must_be_sensor_entity"
 
             # Validiere PV Sensor Einheit (kWh oder Wh)
             if not errors.get(CONF_SENSOR_PV) and sensor_pv:
@@ -161,14 +180,18 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data[CONF_SENSOR_FORECAST] = f"sensor.{prefix}_weather_forecast"
 
             # Wenn kein externer Cloud-Sensor gewählt: Auto-Sensor anlegen.
-            # Der Auto-Sensor sammelt cloud_coverage von der Wetter-Entity und baut
-            # LTS-Statistiken auf. Ab Tag 1 liefert die 3rd UNION der SQL-Query
-            # Wetter-Entity-Daten als Fallback.
             if not data.get(CONF_SENSOR_CLOUDS):
                 clouds_sensor = f"sensor.{prefix}_cloud_coverage"
                 data[CONF_SENSOR_CLOUDS] = clouds_sensor
             else:
                 clouds_sensor = data[CONF_SENSOR_CLOUDS]
+
+            # Wenn kein UV-Sensor gewählt: Auto-Sensor anlegen.
+            if not data.get(CONF_SENSOR_UV):
+                uv_sensor = f"sensor.{prefix}_uv"
+                data[CONF_SENSOR_UV] = uv_sensor
+            else:
+                uv_sensor = data[CONF_SENSOR_UV]
 
             # Erstelle die SQL Query mit den Sensoren
             history_days = data.get(CONF_PV_HISTORY_DAYS, 30)
@@ -176,6 +199,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 sensor_clouds=clouds_sensor,
                 sensor_pv=data[CONF_SENSOR_PV],
                 sensor_forecast=data[CONF_SENSOR_FORECAST],
+                sensor_uv=uv_sensor,
                 history_days=history_days,
                 weather_entity=data[CONF_WEATHER_ENTITY],
             )
@@ -203,6 +227,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Get the sensors configuration schema with pre-filtered entity selectors."""
         percent_ids = _get_percent_sensor_ids(self.hass)
         energy_ids = _get_energy_sensor_ids(self.hass)
+        uv_ids = _get_uv_sensor_ids(self.hass)
         cloud_selector = EntitySelector(
             EntitySelectorConfig(include_entities=percent_ids, multiple=False)
             if percent_ids
@@ -212,6 +237,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             EntitySelectorConfig(include_entities=energy_ids, multiple=False)
             if energy_ids
             else EntitySelectorConfig(domain="sensor", device_class="energy", multiple=False)
+        )
+        uv_selector = EntitySelector(
+            EntitySelectorConfig(include_entities=uv_ids, multiple=False)
+            if uv_ids
+            else EntitySelectorConfig(domain="sensor", multiple=False)
         )
         return vol.Schema(
             {
@@ -226,6 +256,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(
                     CONF_SENSOR_CLOUDS
                 ): cloud_selector,
+                vol.Optional(
+                    CONF_SENSOR_UV
+                ): uv_selector,
                 vol.Optional(
                     CONF_PV_HISTORY_DAYS,
                     default=30
@@ -254,6 +287,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             weather_entity = (user_input.get(CONF_WEATHER_ENTITY) or "").strip()
             sensor_pv = (user_input.get(CONF_SENSOR_PV) or "").strip()
             sensor_clouds = (user_input.get(CONF_SENSOR_CLOUDS) or "").strip()
+            sensor_uv = (user_input.get(CONF_SENSOR_UV) or "").strip()
 
             if not weather_entity:
                 errors["base"] = "weather_entity_required"
@@ -265,6 +299,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors[CONF_SENSOR_PV] = "must_be_sensor_entity"
             if sensor_clouds and not sensor_clouds.startswith("sensor."):
                 errors[CONF_SENSOR_CLOUDS] = "must_be_sensor_entity"
+            if sensor_uv and not sensor_uv.startswith("sensor."):
+                errors[CONF_SENSOR_UV] = "must_be_sensor_entity"
 
             # Validate PV sensor unit (kWh or Wh)
             if not errors.get(CONF_SENSOR_PV) and sensor_pv:
@@ -277,17 +313,21 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if not errors:
                 if not sensor_clouds:
                     sensor_clouds = auto_cloud
+                if not sensor_uv:
+                    sensor_uv = f"sensor.{prefix}_uv"
                 history_days = user_input.get(CONF_PV_HISTORY_DAYS, data.get(CONF_PV_HISTORY_DAYS, 30))
                 data.update({
                     CONF_WEATHER_ENTITY: weather_entity,
                     CONF_SENSOR_PV: sensor_pv,
                     CONF_SENSOR_CLOUDS: sensor_clouds,
+                    CONF_SENSOR_UV: sensor_uv,
                     CONF_PV_HISTORY_DAYS: history_days,
                 })
                 return self.async_update_reload_and_abort(entry, data=data)
 
         percent_ids = _get_percent_sensor_ids(self.hass)
         energy_ids = _get_energy_sensor_ids(self.hass)
+        uv_ids = _get_uv_sensor_ids(self.hass)
         cloud_selector = EntitySelector(
             EntitySelectorConfig(include_entities=percent_ids, multiple=False)
             if percent_ids
@@ -298,10 +338,23 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if energy_ids
             else EntitySelectorConfig(domain="sensor", device_class="energy", multiple=False)
         )
+        uv_selector = EntitySelector(
+            EntitySelectorConfig(include_entities=uv_ids, multiple=False)
+            if uv_ids
+            else EntitySelectorConfig(domain="sensor", multiple=False)
+        )
+        auto_uv = f"sensor.{prefix}_uv"
+        current_uv = data.get(CONF_SENSOR_UV, "")
+        display_uv = current_uv if current_uv and current_uv != auto_uv else None
         cloud_field_key = (
             vol.Optional(CONF_SENSOR_CLOUDS, default=display_cloud)
             if display_cloud is not None
             else vol.Optional(CONF_SENSOR_CLOUDS)
+        )
+        uv_field_key = (
+            vol.Optional(CONF_SENSOR_UV, default=display_uv)
+            if display_uv is not None
+            else vol.Optional(CONF_SENSOR_UV)
         )
         return self.async_show_form(
             step_id="reconfigure",
@@ -309,6 +362,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_WEATHER_ENTITY, default=data.get(CONF_WEATHER_ENTITY, "")):
                     EntitySelector(EntitySelectorConfig(domain="weather", multiple=False)),
                 cloud_field_key: cloud_selector,
+                uv_field_key: uv_selector,
                 vol.Optional(CONF_PV_HISTORY_DAYS, default=data.get(CONF_PV_HISTORY_DAYS, 30)):
                     vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
                 vol.Required(CONF_SENSOR_PV, default=data.get(CONF_SENSOR_PV, "")):
@@ -346,6 +400,11 @@ class OptionsFlow(config_entries.OptionsFlow):
             if not sensor_clouds:
                 sensor_clouds = f"sensor.{prefix}_cloud_coverage"
 
+            # Resolve UV sensor — empty means keep/create the auto-sensor
+            sensor_uv = (user_input.get(CONF_SENSOR_UV) or "").strip()
+            if not sensor_uv:
+                sensor_uv = f"sensor.{prefix}_uv"
+
             sensor_pv = (user_input.get(CONF_SENSOR_PV) or "").strip() or data.get(CONF_SENSOR_PV, "")
 
             # Validate PV sensor unit
@@ -362,10 +421,12 @@ class OptionsFlow(config_entries.OptionsFlow):
                 # Always store new weather entity and regenerate SQL
                 user_input[CONF_WEATHER_ENTITY] = weather_entity
                 user_input[CONF_SENSOR_CLOUDS] = sensor_clouds
+                user_input[CONF_SENSOR_UV] = sensor_uv
                 user_input["sql_query"] = DEFAULT_SQL_QUERY.format(
                     sensor_clouds=sensor_clouds,
                     sensor_pv=sensor_pv,
                     sensor_forecast=sensor_forecast,
+                    sensor_uv=sensor_uv,
                     history_days=history_days,
                     weather_entity=weather_entity,
                 )
@@ -380,6 +441,7 @@ class OptionsFlow(config_entries.OptionsFlow):
 
         percent_ids = _get_percent_sensor_ids(self.hass)
         energy_ids = _get_energy_sensor_ids(self.hass)
+        uv_ids = _get_uv_sensor_ids(self.hass)
         cloud_selector = EntitySelector(
             EntitySelectorConfig(include_entities=percent_ids, multiple=False)
             if percent_ids
@@ -389,6 +451,11 @@ class OptionsFlow(config_entries.OptionsFlow):
             EntitySelectorConfig(include_entities=energy_ids, multiple=False)
             if energy_ids
             else EntitySelectorConfig(domain="sensor", device_class="energy", multiple=False)
+        )
+        uv_selector = EntitySelector(
+            EntitySelectorConfig(include_entities=uv_ids, multiple=False)
+            if uv_ids
+            else EntitySelectorConfig(domain="sensor", multiple=False)
         )
         schema = vol.Schema(
             {
@@ -400,6 +467,10 @@ class OptionsFlow(config_entries.OptionsFlow):
                     CONF_SENSOR_CLOUDS,
                     default=_opt(CONF_SENSOR_CLOUDS),
                 ): cloud_selector,
+                vol.Optional(
+                    CONF_SENSOR_UV,
+                    default=_opt(CONF_SENSOR_UV),
+                ): uv_selector,
                 vol.Optional(
                     CONF_PV_HISTORY_DAYS,
                     default=_opt(CONF_PV_HISTORY_DAYS, 30),

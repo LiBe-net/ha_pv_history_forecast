@@ -26,6 +26,7 @@ from .const import (
     CONF_SENSOR_PREFIX,
     CONF_SENSOR_PV,
     CONF_SENSOR_FORECAST,
+    CONF_SENSOR_UV,
     CONF_WEATHER_ENTITY,
     CONF_PV_HISTORY_DAYS,
     CONF_VALUE_TEMPLATE,
@@ -77,6 +78,10 @@ async def async_setup_entry(
     sensor_clouds = options.get(CONF_SENSOR_CLOUDS, data.get(CONF_SENSOR_CLOUDS, ""))
     sensor_pv = options.get(CONF_SENSOR_PV, data.get(CONF_SENSOR_PV, ""))
     sensor_forecast = options.get(CONF_SENSOR_FORECAST, data.get(CONF_SENSOR_FORECAST, forecast_entity_id))
+    sensor_uv = options.get(CONF_SENSOR_UV, data.get(CONF_SENSOR_UV, ""))
+    if not sensor_uv:
+        # Fallback for existing installs that pre-date the UV sensor feature
+        sensor_uv = f"sensor.{prefix}_uv"
     history_days = options.get(CONF_PV_HISTORY_DAYS, data.get(CONF_PV_HISTORY_DAYS, 30))
     weather_entity = options.get(CONF_WEATHER_ENTITY) or data.get(CONF_WEATHER_ENTITY, "")
     try:
@@ -84,6 +89,7 @@ async def async_setup_entry(
             sensor_clouds=sensor_clouds,
             sensor_pv=sensor_pv,
             sensor_forecast=sensor_forecast,
+            sensor_uv=sensor_uv,
             history_days=history_days,
             weather_entity=weather_entity,
         )
@@ -174,6 +180,27 @@ async def async_setup_entry(
 
     entities = [sql_sensor, min_sensor, max_sensor, tomorrow_sensor, cloud_today_sensor, cloud_tomorrow_sensor, method_today_sensor, method_tomorrow_sensor]
 
+    # UV forecast sensors (read uv_avg_today_remaining / uv_avg_tomorrow from SQL JSON)
+    uv_remaining_today_sensor = CloudForecastSensor(
+        hass=hass,
+        config_entry=config_entry,
+        main_entity_id=main_entity_id,
+        name=f"{prefix}_uv_remaining_today",
+        json_field="uv_avg_today_remaining",
+        unit_of_measurement="UV index",
+        icon="mdi:sun-wireless",
+    )
+    uv_tomorrow_sensor = CloudForecastSensor(
+        hass=hass,
+        config_entry=config_entry,
+        main_entity_id=main_entity_id,
+        name=f"{prefix}_uv_tomorrow",
+        json_field="uv_avg_tomorrow",
+        unit_of_measurement="UV index",
+        icon="mdi:sun-wireless",
+    )
+    entities.extend([uv_remaining_today_sensor, uv_tomorrow_sensor])
+
     # Create dedicated cloud coverage sensor when no external sensor is configured.
     # Mirrors cloud_coverage from the weather entity so HA accumulates LTS statistics.
     # The SQL 3rd UNION provides weather entity fallback from day 1 until LTS is built up.
@@ -186,6 +213,19 @@ async def async_setup_entry(
             weather_entity=data.get(CONF_WEATHER_ENTITY, ""),
         )
         entities.append(cloud_entity)
+
+    # Create dedicated UV index sensor when no external sensor is configured.
+    # Mirrors uv_index from the weather entity so HA accumulates LTS statistics.
+    # The SQL UV-sensor branch provides weather entity fallback until LTS is built up.
+    # sensor_uv already has the auto-sensor fallback applied above.
+    if sensor_uv == f"sensor.{prefix}_uv":
+        uv_entity = UVIndexSensor(
+            hass=hass,
+            config_entry=config_entry,
+            name=f"{prefix}_uv",
+            weather_entity=data.get(CONF_WEATHER_ENTITY, ""),
+        )
+        entities.append(uv_entity)
 
     if coordinator:
         entities.append(weather_sensor)
@@ -418,7 +458,7 @@ FROM vars
             "pv_history_days": self._pv_history_days,
         }
         if self._last_raw_result is not None:
-            attrs["sql_raw_json"] = self._last_raw_result
+            attrs["json"] = self._last_raw_result
         if self._lovelace_card_remaining_today is not None:
             attrs["lovelace_card_remaining_today"] = self._lovelace_card_remaining_today
         if self._lovelace_card_tomorrow is not None:
@@ -478,10 +518,10 @@ class PVForecastTemplateSensor(SensorEntity):
     async def async_update(self) -> None:
         """Update by reading raw JSON from the main sensor's attributes."""
         main_state = self.hass.states.get(self._main_entity_id)
-        if main_state is None or not main_state.attributes.get("sql_raw_json"):
+        if main_state is None or not main_state.attributes.get("json"):
             self._attr_available = False
             return
-        raw = main_state.attributes["sql_raw_json"]
+        raw = main_state.attributes["json"]
         self._attr_native_value = self._apply_template(raw)
         self._attr_available = self._attr_native_value is not None
 
@@ -541,10 +581,10 @@ class ForecastMethodSensor(SensorEntity):
     async def async_update(self) -> None:
         """Update by reading raw JSON from the main sensor's attributes."""
         main_state = self.hass.states.get(self._main_entity_id)
-        if main_state is None or not main_state.attributes.get("sql_raw_json"):
+        if main_state is None or not main_state.attributes.get("json"):
             self._attr_available = False
             return
-        raw = main_state.attributes["sql_raw_json"]
+        raw = main_state.attributes["json"]
         try:
             template = Template(self._value_template_str, self.hass)
             rendered = template.async_render({"value": raw, "latitude": self.hass.config.latitude})
@@ -664,6 +704,57 @@ class CloudCoverageSensor(SensorEntity):
         return True
 
 
+class UVIndexSensor(SensorEntity):
+    """UV Index Sensor that mirrors the weather entity's uv_index attribute.
+
+    Created automatically when no external UV index sensor is configured.
+    Registers as a proper HA sensor so Home Assistant tracks its long-term
+    statistics (LTS).  After >10 days of runtime the SQL forecast query will
+    use these accumulated statistics for richer historical matching.
+    """
+
+    _attr_icon = "mdi:sun-wireless"
+    _attr_native_unit_of_measurement = "UV index"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        config_entry: ConfigEntry,
+        name: str,
+        weather_entity: str,
+    ) -> None:
+        """Initialize the sensor."""
+        self.hass = hass
+        self.config_entry = config_entry
+        self._attr_name = name
+        self._attr_unique_id = f"{DOMAIN}_{config_entry.entry_id}_uv_index"
+        self._attr_native_value = None
+        self._attr_available = False
+        self._weather_entity = weather_entity
+        self.entity_id = generate_entity_id("sensor.{}", name, hass=hass)
+
+    async def async_update(self) -> None:
+        """Read uv_index from the weather entity attributes."""
+        state = self.hass.states.get(self._weather_entity)
+        if state is None or state.state in ("unknown", "unavailable", ""):
+            self._attr_available = False
+            return
+        uv_index = state.attributes.get("uv_index")
+        if uv_index is not None:
+            try:
+                self._attr_native_value = float(uv_index)
+                self._attr_available = True
+            except (ValueError, TypeError):
+                self._attr_available = False
+        else:
+            self._attr_available = False
+
+    @property
+    def should_poll(self) -> bool:
+        return True
+
+
 class CloudForecastSensor(SensorEntity):
     """Exposes a single numeric field from the main sensor's SQL JSON result.
 
@@ -683,6 +774,8 @@ class CloudForecastSensor(SensorEntity):
         main_entity_id: str,
         name: str,
         json_field: str,
+        unit_of_measurement: str | None = None,
+        icon: str | None = None,
     ) -> None:
         """Initialize the sensor."""
         self.hass = hass
@@ -694,6 +787,10 @@ class CloudForecastSensor(SensorEntity):
         self._attr_native_value = None
         self._attr_available = False
         self.entity_id = generate_entity_id("sensor.{}", name, hass=hass)
+        if unit_of_measurement is not None:
+            self._attr_native_unit_of_measurement = unit_of_measurement
+        if icon is not None:
+            self._attr_icon = icon
 
     async def async_update(self) -> None:
         """Read the target field from the main sensor's raw JSON attribute."""
@@ -701,7 +798,7 @@ class CloudForecastSensor(SensorEntity):
         if main_state is None:
             self._attr_available = False
             return
-        raw = main_state.attributes.get("sql_raw_json")
+        raw = main_state.attributes.get("json")
         if not raw:
             self._attr_available = False
             return

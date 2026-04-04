@@ -7,6 +7,7 @@
   {# --- 1. AVERAGE CLOUD COVERAGE TOMORROW (already correctly computed in UTC by SQL) --- #}
   {# Direct read from SQL data avoids UTC/local-time errors in the forecast comparison #}
   {% set f_avg_tomorrow = data[0].f_avg_tomorrow | float(default=50.0) %}
+  {% set f_uv_avg_tomorrow = data[0].uv_avg_tomorrow | float(default=0.0) %}
 
   {# ASTRONOMICAL BASE DATA FOR TOMORROW (location-specific via latitude) #}
   {% set latitude = latitude if latitude is defined else state_attr('zone.home', 'latitude') | float(48.0) %}
@@ -30,8 +31,14 @@
       {% set dl_item = 24 / pi * acos([[(-tan(lat_rad) * tan(decl_i)), -1.0] | max, 1.0] | min) %}
       {% set sun_item = 0.65 + 0.35 * cos((item_day - 172) * 2 * pi / 365) %}
       {% set s_korr = (sun_tomorrow / sun_item) * (dl_tomorrow / dl_item) %}
-      {# Weighting: the closer the cloud coverage, the stronger the weight #}
-      {% set diff = (clouds_hist - f_avg_tomorrow) | abs %}
+      {% set uv_hist = item.uv_avg_total | float(default=0) %}
+      {# Weighting: combined cloud + UV distance #}
+      {% set diff_c = (clouds_hist - f_avg_tomorrow) | abs %}
+      {% if f_uv_avg_tomorrow > 0 %}
+        {% set diff = diff_c * 0.7 + (uv_hist - f_uv_avg_tomorrow) | abs * 8.0 * 0.3 %}
+      {% else %}
+        {% set diff = diff_c %}
+      {% endif %}
       {% set w = 1 / ([diff, 0.5] | max) %}
       {% set ns_pool.total_w = ns_pool.total_w + w %}
       {% set ns_pool.items = ns_pool.items + [{'y_korr': yield_total * s_korr, 'h_avg': clouds_hist, 'w': w}] %}

@@ -7,6 +7,7 @@ from typing import Final
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.event import async_call_later
 
 from .coordinator import WeatherCoordinator
 from .const import CONF_WEATHER_ENTITY
@@ -44,9 +45,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # the flow mid-response and the UI shows "Unknown error" even though the
     # data was saved correctly.
     async def _delayed_reload(hass: HomeAssistant, entry: ConfigEntry) -> None:
-        def _do_reload(_now: object) -> None:
-            hass.async_create_task(hass.config_entries.async_reload(entry.entry_id))
-        hass.call_later(0.5, _do_reload)
+        async def _do_reload(_now) -> None:
+            await hass.config_entries.async_reload(entry.entry_id)
+        async_call_later(hass, 0.5, _do_reload)
 
     entry.async_on_unload(entry.add_update_listener(_delayed_reload))
 

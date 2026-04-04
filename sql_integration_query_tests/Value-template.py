@@ -1,6 +1,6 @@
 {# PV FORECAST LOGIC: Calculates remaining yield based on historically similar days #}
 {# Standalone test: reads from sensor attribute when 'value' is not passed by the sensor. #}
-{% set raw = value if value is defined else state_attr('sensor.pv_hist_remaining_today', 'sql_raw_json') %}
+{% set raw = value if value is defined else state_attr('sensor.pv_hist_remaining_today', 'json') %}
 
 {% if raw and raw != '[]' and raw is not none %}
   {% set data = raw | from_json %}
@@ -46,10 +46,12 @@
     {% set sun_today = 0.65 + 0.35 * cos((day_of_year - 172) * 2 * pi / 365) %}
 
     {# --- 4. BUILD DATA POOL --- #}
+    {% set f_uv_avg = data[0].uv_avg_today_remaining | float(default=0.0) %}
     {% set ns_pool = namespace(items=[], total_w=0) %}
     {% for item in data %}
       {% set yield_raw = item.yield_day_remaining | float(default=0) %}
       {% set clouds = item.h_avg_remaining | float(default=0) %}
+      {% set uv_hist = item.uv_avg_remaining | float(default=0) %}
       {% set dt_item = as_datetime(item.date) %}
       
       {% if dt_item is not none %}
@@ -59,7 +61,12 @@
         {% set dl_item = 24 / pi * acos([[cos_ha_i, -1.0] | max, 1.0] | min) %}
         {% set sun_item = 0.65 + 0.35 * cos((item_day - 172) * 2 * pi / 365) %}
         {% set s_korr = (sun_today / sun_item) * (dl_today / dl_item) %}
-        {% set diff = (clouds - f_avg) | abs %}
+        {% set diff_c = (clouds - f_avg) | abs %}
+        {% if f_uv_avg > 0 %}
+          {% set diff = diff_c * 0.7 + (uv_hist - f_uv_avg) | abs * 8.0 * 0.3 %}
+        {% else %}
+          {% set diff = diff_c %}
+        {% endif %}
         {% set w = 1 / ([diff, 0.5] | max) %}
 
         {% if yield_raw > 0.05 or clouds > 95 or current_month in [12, 1, 2] %}

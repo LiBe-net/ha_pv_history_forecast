@@ -1,10 +1,10 @@
 ﻿{# =================================================================
    PV remaining yield today – Lovelace Markdown Card (Option B: Inline template)
-   Source sensor:   sensor.pv_hist_remaining_today  (attribute: sql_raw_json)
+   Source sensor:   sensor.pv_hist_remaining_today  (attribute: json)
    Forecast sensor: sensor.pv_hist_weather_forecast (attribute: forecast)
 
    RECOMMENDED: Use Option A instead of this inline template:
-   {{ state_attr('sensor.pv_hist_remaining_today', 'lovelace_card') }}
+   {{ state_attr('sensor.pv_hist_remaining_today', 'lovelace_card_card_remaining_today') }}
 
    Option B: Use this content directly as a Lovelace Markdown card.
    ================================================================= #}
@@ -14,6 +14,7 @@
 
   {% if data | length > 0 %}
     {% set f_avg = data[0].f_avg_today_remaining | float(default=50.0) %}
+    {% set f_uv_avg = data[0].uv_avg_today_remaining | float(default=0.0) %}
 
     {# 0. NIGHT-CHECK: 0.0 only after local sunset until midnight. Midnight→sunrise: full-day forecast. #}
     {% set offset_min = (now().utcoffset().total_seconds() / 60) | int %}
@@ -50,6 +51,7 @@
       {% set yield_raw = item.yield_day_remaining | float(default=0) %}
       {% set clouds = item.h_avg_remaining | float(default=0) %}
       {% set clouds_total = item.h_avg_total | float(default=0) %}
+      {% set uv = item.uv_avg_remaining | float(default=0) %}
       {% set item_dt = as_datetime(item.date) %}
       {% if item_dt is not none %}
         {% set item_day = item_dt.strftime('%j') | int(default=1) %}
@@ -58,13 +60,18 @@
         {% set dl_item = 24 / pi * acos([[cos_ha_i, -1.0] | max, 1.0] | min) %}
         {% set sun_item = 0.65 + 0.35 * cos((item_day - 172) * 2 * pi / 365) %}
         {% set s_korr = (sun_today / sun_item) * (dl_today / dl_item) %}
-        {% set diff = (clouds - f_avg) | abs %}
+        {% set diff_c = (clouds - f_avg) | abs %}
+        {% if f_uv_avg > 0 %}
+          {% set diff = diff_c * 0.7 + (uv - f_uv_avg) | abs * 8.0 * 0.3 %}
+        {% else %}
+          {% set diff = diff_c %}
+        {% endif %}
         {% set w = 1 / ([diff, 0.5] | max) %}
         {% if yield_raw > 0.05 or clouds > 95 or current_month in [12, 1, 2] %}
           {% set ns_pool.total_w = ns_pool.total_w + w %}
-          {% set ns_pool.items = ns_pool.items + [{'date': item.date, 'h_avg': clouds, 'h_avg_total': clouds_total, 'y_korr': yield_raw * s_korr, 's_fakt': s_korr, 'w': w, 'yield_day_total': item.yield_day_total, 'filtered': false}] %}
+          {% set ns_pool.items = ns_pool.items + [{'date': item.date, 'h_avg': clouds, 'h_avg_total': clouds_total, 'uv_avg': uv, 'y_korr': yield_raw * s_korr, 's_fakt': s_korr, 'w': w, 'yield_day_total': item.yield_day_total, 'filtered': false}] %}
         {% else %}
-          {% set ns_pool.items = ns_pool.items + [{'date': item.date, 'h_avg': clouds, 'h_avg_total': clouds_total, 'y_korr': yield_raw * s_korr, 's_fakt': s_korr, 'w': 0, 'yield_day_total': item.yield_day_total, 'filtered': true}] %}
+          {% set ns_pool.items = ns_pool.items + [{'date': item.date, 'h_avg': clouds, 'h_avg_total': clouds_total, 'uv_avg': uv, 'y_korr': yield_raw * s_korr, 's_fakt': s_korr, 'w': 0, 'yield_day_total': item.yield_day_total, 'filtered': true}] %}
         {% endif %}
       {% endif %}
     {% endfor %}
@@ -97,13 +104,13 @@
 
 **Forecast:**
 ## {{ (0.0 if is_night else final_val) | round(2) }} kWh
-*Basis: **{{ f_avg }}%** clouds | **{{ method }}***
+*Basis: **{{ f_avg }}%** clouds, **{{ f_uv_avg }}** uv | **{{ method }}***
 {% if snow_factor_today < 1.0 %}⚠️ **Snow suspected! ({{ (snow_factor_today * 100) | round(0) }}%)**{% endif %}
 
-| Date | Day clouds | Day yield | Rem. clouds | Rem. yield | Weight |
-| :--- | :---: | :---: | :---: | :---: | :---: |
+| Date | Day clouds | Day yield | Rem. clouds | Rem. uv | Rem. yield | Weight |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
 {%- for item in ns_pool.items | sort(attribute='w', reverse=True) %}
-| {{ item.date }} | {{ item.h_avg_total }}% | {{ item.yield_day_total }} | **{{ item.h_avg }}%** | **{{ ((item.y_korr * snow_factor_today) / scale) | round(2) }} <small><small>({{ item.s_fakt | round(2) }}x)</small></small>**{% if item.filtered %}❌{% endif %} | {{ (((item.w / ns_pool.total_w) * 100) if ns_pool.total_w > 0 else 0) | round(1) }}% |
+| {{ item.date }} | {{ item.h_avg_total }}% | {{ item.yield_day_total }} | **{{ item.h_avg }}%** | {{ item.uv_avg | round(1) }} | **{{ ((item.y_korr * snow_factor_today) / scale) | round(2) }} <small><small>({{ item.s_fakt | round(2) }}x)</small></small>**{% if item.filtered %}❌{% endif %} | {{ (((item.w / ns_pool.total_w) * 100) if ns_pool.total_w > 0 else 0) | round(1) }}% |
 {%- endfor %}
 
   {% else %}

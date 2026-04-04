@@ -15,6 +15,7 @@
         "data": {
           "weather_entity": "Weather Entity (Required) - e.g. weather.forecast_home",
           "sensor_clouds": "Cloud Coverage Sensor (Optional — leave empty: auto-sensor is kept, works from day 1)",
+          "sensor_uv": "UV Index Sensor (Optional — leave empty: auto-sensor is kept)",
           "pv_history_days": "Days of cloud history (default: 30)",
           "sensor_pv": "PV Panel Energy Sensor (e.g. sensor.pv_panels_energy)"
         }
@@ -25,6 +26,7 @@
         "data": {
           "weather_entity": "Weather Entity (Required) - e.g. weather.forecast_home",
           "sensor_clouds": "Cloud Coverage Sensor (Optional — leave empty: auto-sensor is created automatically, works from day 1)",
+          "sensor_uv": "UV Index Sensor (Optional — leave empty: auto-sensor is created automatically)",
           "pv_history_days": "Days of cloud history to use (only applies when a cloud coverage sensor is selected above; default: 30)",
           "sensor_pv": "PV Panel Energy Sensor (e.g. sensor.pv_panels_energy)"
         }
@@ -51,6 +53,7 @@
         "data": {
           "weather_entity": "Weather Entity (e.g. weather.forecast_home)",
           "sensor_clouds": "Cloud Coverage Sensor (leave empty = auto-sensor)",
+          "sensor_uv": "UV Index Sensor (leave empty = auto-sensor)",
           "pv_history_days": "Cloud history days",
           "sensor_pv": "PV Panel Energy Sensor"
         }

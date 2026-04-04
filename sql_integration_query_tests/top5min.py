@@ -9,6 +9,7 @@
     0.0
   {% else %}
     {% set f_avg = data[0].f_avg_today_remaining | float(default=50.0) %}
+    {% set f_uv_avg = data[0].uv_avg_today_remaining | float(default=0.0) %}
     {% set current_month = now().month %}
     {% set doy = now().strftime('%j') | int(default=1) %}
     {% set latitude = latitude if latitude is defined else state_attr('zone.home', 'latitude') | float(48.0) %}
@@ -26,7 +27,13 @@
         {% set sun_item = 0.65 + 0.35 * cos((item_day - 172) * 2 * pi / 365) %}
         {% set s_korr = (sun_today / sun_item) * (dl_today / dl_item) %}
         {% set yield_korr = item.yield_day_remaining | float(default=0) * s_korr %}
-        {% set diff = (item.h_avg_remaining | float(default=0) - f_avg) | abs %}
+        {% set uv_hist = item.uv_avg_remaining | float(default=0) %}
+        {% set diff_c = (item.h_avg_remaining | float(default=0) - f_avg) | abs %}
+        {% if f_uv_avg > 0 %}
+          {% set diff = diff_c * 0.7 + (uv_hist - f_uv_avg) | abs * 8.0 * 0.3 %}
+        {% else %}
+          {% set diff = diff_c %}
+        {% endif %}
         {% set ns_pool.items = ns_pool.items + [{'diff': diff, 'h_avg': item.h_avg_remaining | float(0), 'y_korr': yield_korr}] %}
       {% endif %}
     {% endfor %}
