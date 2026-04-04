@@ -39,14 +39,18 @@
       {% else %}
         {% set diff = diff_c %}
       {% endif %}
-      {% set w = 1 / ([diff, 0.5] | max) %}
+      {% set days_ago = ((now().timestamp() - dt_item.timestamp()) / 86400) | int(0) %}
+      {% set w = (1 / ([diff, 0.5] | max)) * (1.0 + 0.3 * ([1.0 - days_ago / 30.0, 0.0] | max)) %}
       {% set ns_pool.total_w = ns_pool.total_w + w %}
       {% set ns_pool.items = ns_pool.items + [{'y_korr': yield_total * s_korr, 'h_avg': clouds_hist, 'w': w}] %}
     {% endif %}
   {% endfor %}
 
   {# --- 4. FORECAST CALCULATION --- #}
-  {% set pool = ns_pool.items %}
+  {% set top15 = (ns_pool.items | sort(attribute='w', reverse=True))[:15] %}
+  {% set ns_top = namespace(total_w=0) %}
+  {% for item in top15 %}{% set ns_top.total_w = ns_top.total_w + item.w %}{% endfor %}
+  {% set pool = top15 %}
   {% set brighter = pool | selectattr('h_avg', 'le', f_avg_tomorrow) | list %}
   {% set darker = pool | selectattr('h_avg', 'ge', f_avg_tomorrow) | list %}
   {% set res = 0 %}
@@ -66,7 +70,7 @@
     {% for item in pool %}
       {% set ns_mix.ws = ns_mix.ws + (item.y_korr * item.w) %}
     {% endfor %}
-    {% set res = ns_mix.ws / (ns_pool.total_w if ns_pool.total_w > 0 else 1) %}
+    {% set res = ns_mix.ws / (ns_top.total_w if ns_top.total_w > 0 else 1) %}
   {% endif %}
 
   {# Ergebnis-Ausgabe: Wh in kWh konvertieren falls Wert sehr hoch ist (Logik-Check) #}

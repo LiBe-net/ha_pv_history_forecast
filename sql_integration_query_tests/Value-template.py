@@ -67,7 +67,8 @@
         {% else %}
           {% set diff = diff_c %}
         {% endif %}
-        {% set w = 1 / ([diff, 0.5] | max) %}
+        {% set days_ago = ((now().timestamp() - dt_item.timestamp()) / 86400) | int(0) %}
+        {% set w = (1 / ([diff, 0.5] | max)) * (1.0 + 0.3 * ([1.0 - days_ago / 30.0, 0.0] | max)) %}
 
         {% if yield_raw > 0.05 or clouds > 95 or current_month in [12, 1, 2] %}
           {% set ns_pool.total_w = ns_pool.total_w + w %}
@@ -77,7 +78,10 @@
     {% endfor %}
 
     {# --- 5. FORECAST CALCULATION --- #}
-    {% set pool = ns_pool.items %}
+    {% set top15 = (ns_pool.items | sort(attribute='w', reverse=True))[:15] %}
+    {% set ns_top = namespace(total_w=0) %}
+    {% for item in top15 %}{% set ns_top.total_w = ns_top.total_w + item.w %}{% endfor %}
+    {% set pool = top15 %}
     {% set brighter = pool | selectattr('h_avg', 'le', f_avg) | list %}
     {% set darker = pool | selectattr('h_avg', 'ge', f_avg) | list %}
     {% set res = 0 %}
@@ -92,7 +96,7 @@
       {% for item in pool %}
         {% set ns_mix.ws = ns_mix.ws + (item.y_korr * item.w) %}
       {% endfor %}
-      {% set res = ns_mix.ws / (ns_pool.total_w if ns_pool.total_w > 0 else 1) %}
+      {% set res = ns_mix.ws / (ns_top.total_w if ns_top.total_w > 0 else 1) %}
     {% endif %}
 
     {# --- 6. FINAL SCALING --- #}

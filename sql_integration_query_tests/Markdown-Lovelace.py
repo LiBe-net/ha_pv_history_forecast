@@ -66,7 +66,8 @@
         {% else %}
           {% set diff = diff_c %}
         {% endif %}
-        {% set w = 1 / ([diff, 0.5] | max) %}
+        {% set days_ago = ((now().timestamp() - item_dt.timestamp()) / 86400) | int(0) %}
+        {% set w = (1 / ([diff, 0.5] | max)) * (1.0 + 0.3 * ([1.0 - days_ago / 30.0, 0.0] | max)) %}
         {% if yield_raw > 0.05 or clouds > 95 or current_month in [12, 1, 2] %}
           {% set ns_pool.total_w = ns_pool.total_w + w %}
           {% set ns_pool.items = ns_pool.items + [{'date': item.date, 'h_avg': clouds, 'h_avg_total': clouds_total, 'uv_avg': uv, 'y_korr': yield_raw * s_korr, 's_fakt': s_korr, 'w': w, 'yield_day_total': item.yield_day_total, 'filtered': false}] %}
@@ -76,7 +77,10 @@
       {% endif %}
     {% endfor %}
 
-    {% set pool = ns_pool.items | selectattr('filtered', 'equalto', false) | list %}
+    {% set top15 = (ns_pool.items | sort(attribute='w', reverse=True))[:15] %}
+    {% set ns_top = namespace(total_w=0) %}
+    {% for item in top15 %}{% if not item.filtered %}{% set ns_top.total_w = ns_top.total_w + item.w %}{% endif %}{% endfor %}
+    {% set pool = top15 | selectattr('filtered', 'equalto', false) | list %}
     {% set brighter = pool | selectattr('h_avg', 'le', f_avg) | list %}
     {% set darker = pool | selectattr('h_avg', 'ge', f_avg) | list %}
     {% set res = 0 %}
@@ -96,7 +100,7 @@
       {% for item in pool %}
         {% set ns_mix.ws = ns_mix.ws + (item.y_korr * item.w) %}
       {% endfor %}
-      {% set res = ns_mix.ws / (ns_pool.total_w if ns_pool.total_w > 0 else 1) %}
+      {% set res = ns_mix.ws / (ns_top.total_w if ns_top.total_w > 0 else 1) %}
     {% endif %}
 
     {% set scale = 1000 if res > 200 else 1 %}
@@ -109,8 +113,8 @@
 
 | Date | Day clouds | Day yield | Rem. clouds | Rem. uv | Rem. yield | Weight |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-{%- for item in ns_pool.items | sort(attribute='w', reverse=True) %}
-| {{ item.date }} | {{ item.h_avg_total }}% | {{ item.yield_day_total }} | **{{ item.h_avg }}%** | {{ item.uv_avg | round(1) }} | **{{ ((item.y_korr * snow_factor_today) / scale) | round(2) }} <small><small>({{ item.s_fakt | round(2) }}x)</small></small>**{% if item.filtered %}❌{% endif %} | {{ (((item.w / ns_pool.total_w) * 100) if ns_pool.total_w > 0 else 0) | round(1) }}% |
+{%- for item in top15 %}
+| {{ item.date }} | {{ item.h_avg_total }}% | {{ item.yield_day_total }} | **{{ item.h_avg }}%** | {{ item.uv_avg | round(1) }} | **{{ ((item.y_korr * snow_factor_today) / scale) | round(2) }} <small><small>({{ item.s_fakt | round(2) }}x)</small></small>**{% if item.filtered %}❌{% endif %} | {{ (((item.w / ns_top.total_w) * 100) if ns_top.total_w > 0 else 0) | round(1) }}% |
 {%- endfor %}
 
   {% else %}
