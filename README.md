@@ -4,8 +4,13 @@
 
 A Home Assistant HACS integration that forecasts the remaining and tomorrow's PV solar yield,
 based on historical yield data from the Home Assistant database.
+<br><br><a href="https://www.buymeacoffee.com/libe.net" rel="nofollow">
+  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" style="height: 60px !important; width: 217px !important; max-width: 100%;">
+</a><br>
+
 
 **Documentation:** [www.libe.net/pv-forecast](https://www.libe.net/pv-forecast)
+
 
 ## Installation
 
@@ -36,3 +41,4 @@ content: >-
 ## License
 
 MIT — see [LICENSE](LICENSE)
+
