@@ -301,10 +301,12 @@ DEFAULT_VALUE_TEMPLATE_METHOD_TODAY = """{#- Return the decision method used for
     {% set current_month = now().month %}
     {% set ns_pool = namespace(items=[]) %}
     {% for item in data %}
-      {% set yield_raw = item.yield_day_remaining | float(default=0) %}
-      {% set clouds = item.h_avg_remaining | float(default=0) %}
-      {% if yield_raw > 0.05 or clouds > 95 or current_month in [12, 1, 2] %}
-        {% set ns_pool.items = ns_pool.items + [{'h_avg': clouds}] %}
+      {% if as_datetime(item.date) is not none %}
+        {% set yield_raw = item.yield_day_remaining | float(default=0) %}
+        {% set clouds = item.h_avg_remaining | float(default=0) %}
+        {% if yield_raw > 0.05 or clouds > 95 or current_month in [12, 1, 2] %}
+          {% set ns_pool.items = ns_pool.items + [{'h_avg': clouds}] %}
+        {% endif %}
       {% endif %}
     {% endfor %}
     {% set pool = ns_pool.items %}
@@ -313,6 +315,7 @@ DEFAULT_VALUE_TEMPLATE_METHOD_TODAY = """{#- Return the decision method used for
     {% if brighter | count > 0 and darker | count == 0 %}Light reduction
     {% elif darker | count > 0 and pool | selectattr('h_avg', 'le', f_avg) | list | count == 0 %}Max assumption
     {% elif pool | count > 0 %}Weighted average
+    {% elif data | selectattr('date', 'equalto', 'forecast_only') | list | count > 0 %}No history yet
     {% else %}No data
     {% endif %}
   {% else %}No data
@@ -328,8 +331,10 @@ DEFAULT_VALUE_TEMPLATE_METHOD_TOMORROW = """{#- Return the decision method used 
     {% set f_avg_tomorrow = data[0].f_avg_tomorrow | float(default=50.0) %}
     {% set ns_pool = namespace(items=[]) %}
     {% for item in data %}
-      {% set clouds_hist = item.h_avg_total | float(default=0) %}
-      {% set ns_pool.items = ns_pool.items + [{'h_avg': clouds_hist}] %}
+      {% if as_datetime(item.date) is not none %}
+        {% set clouds_hist = item.h_avg_total | float(default=0) %}
+        {% set ns_pool.items = ns_pool.items + [{'h_avg': clouds_hist}] %}
+      {% endif %}
     {% endfor %}
     {% set pool = ns_pool.items %}
     {% set brighter = pool | selectattr('h_avg', 'le', f_avg_tomorrow) | list %}
@@ -337,6 +342,7 @@ DEFAULT_VALUE_TEMPLATE_METHOD_TOMORROW = """{#- Return the decision method used 
     {% if brighter | count > 0 and darker | count == 0 %}Light reduction
     {% elif darker | count > 0 and pool | selectattr('h_avg', 'le', f_avg_tomorrow) | list | count == 0 %}Max assumption
     {% elif pool | count > 0 %}Weighted average
+    {% elif data | selectattr('date', 'equalto', 'forecast_only') | list | count > 0 %}No history yet
     {% else %}No data
     {% endif %}
   {% else %}No data
@@ -617,8 +623,15 @@ SELECT COALESCE(json_group_array(
         'pv_end', (SELECT sun_end FROM pv_activity)
     )
 ), '[]') as json 
-FROM final_data 
-WHERE day_max > 0"""
+FROM (
+    SELECT day, h_avg_total_val, h_avg_rest_val, uv_avg_total_val, uv_avg_rest_val,
+           day_max, day_min, h_hour_curr, h_hour_prev
+    FROM final_data WHERE day_max > 0
+    UNION ALL
+    /* Fallback row: provides forecast values even when no historical data exists (new install). */
+    /* date='forecast_only' → as_datetime() returns None → skipped in all Jinja loops.         */
+    SELECT 'forecast_only', NULL, NULL, NULL, NULL, 1, NULL, NULL, NULL
+    WHERE NOT EXISTS (SELECT 1 FROM final_data WHERE day_max > 0))"""
 
 DEFAULT_LOVELACE_TEMPLATE_REMAINING_TODAY = """{#- Remaining-today table only (no headlines) -#}
 {% if raw_json and raw_json != '[]' and raw_json is not none %}

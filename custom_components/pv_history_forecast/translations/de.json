@@ -11,7 +11,7 @@
       },
       "reconfigure": {
         "title": "PV History Forecast neu konfigurieren",
-        "description": "Passe die Sensoren des bestehenden Eintrags an.\n\nWird **kein** Cloud-Sensor ausgewählt, wird der Auto-Sensor automatisch beibehalten.",
+        "description": "Passe die Sensoren des bestehenden Eintrags an.\n\nWird **kein** Cloud-Sensor ausgewählt, wird der Auto-Sensor automatisch beibehalten.\n\n{weather_history_warning}",
         "data": {
           "weather_entity": "Wetter Entity (Pflicht) - z.B. weather.forecast_home",
           "sensor_clouds": "Cloud Coverage Sensor (Optional — leer lassen: Auto-Sensor wird beibehalten, ab Tag 1 nutzbar)",
@@ -22,7 +22,7 @@
       },
       "sensors": {
         "title": "Sensoren konfigurieren",
-        "description": "Wähle die Sensoren für den PV-Forecast aus.\n\nWird **kein** Cloud-Sensor ausgewählt, legt die Integration automatisch einen Cloud-Coverage-Sensor an. Dieser sammelt Bewölkungsdaten von der Wetter-Entity und ist **ab Tag 1** nutzbar. LTS-Verlauf (>10 Tage) baut sich automatisch auf.",
+        "description": "Wähle die Sensoren für den PV-Forecast aus.\n\nWird **kein** Cloud-Sensor ausgewählt, legt die Integration automatisch einen Cloud-Coverage-Sensor an. Dieser sammelt Bewölkungsdaten von der Wetter-Entity und ist **ab Tag 1** nutzbar. LTS-Verlauf (>10 Tage) baut sich automatisch auf.\n\n{weather_history_warning}",
         "data": {
           "weather_entity": "Wetter Entity (Pflicht) - z.B. weather.forecast_home",
           "sensor_clouds": "Cloud Coverage Sensor (Optional — leer lassen: Auto-Sensor wird automatisch angelegt, ab Tag 1 nutzbar)",
@@ -44,7 +44,7 @@
     "step": {
       "init": {
         "title": "PV History Forecast Optionen",
-        "description": "Aktualisiere die Sensoren und Einstellungen",
+        "description": "Aktualisiere die Sensoren und Einstellungen\n\n{weather_history_warning}",
         "data": {
           "weather_entity": "Wetter Entity (z.B. weather.forecast_home)",
           "sensor_clouds": "Cloud Coverage Sensor (leer = Auto-Sensor)",

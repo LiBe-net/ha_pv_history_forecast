@@ -11,7 +11,7 @@
       },
       "reconfigure": {
         "title": "Reconfigure PV History Forecast",
-        "description": "Update the sensors for the existing entry.\n\nIf **no** cloud sensor is selected, the auto-sensor is kept automatically.",
+        "description": "Update the sensors for the existing entry.\n\nIf **no** cloud sensor is selected, the auto-sensor is kept automatically.\n\n{weather_history_warning}",
         "data": {
           "weather_entity": "Weather Entity (Required) - e.g. weather.forecast_home",
           "sensor_clouds": "Cloud Coverage Sensor (Optional — leave empty: auto-sensor is kept, works from day 1)",
@@ -22,7 +22,7 @@
       },
       "sensors": {
         "title": "Configure Sensors",
-        "description": "Select sensors from the dropdown lists.\n\nIf **no** cloud coverage sensor is selected, the integration automatically creates a cloud coverage sensor. This sensor collects cloud data from the weather entity and works **from day 1**. LTS history (>10 days) builds up automatically.",
+        "description": "Select sensors from the dropdown lists.\n\nIf **no** cloud coverage sensor is selected, the integration automatically creates a cloud coverage sensor. This sensor collects cloud data from the weather entity and works **from day 1**. LTS history (>10 days) builds up automatically.\n\n{weather_history_warning}",
         "data": {
           "weather_entity": "Weather Entity (Required) - e.g. weather.forecast_home",
           "sensor_clouds": "Cloud Coverage Sensor (Optional — leave empty: auto-sensor is created automatically, works from day 1)",
@@ -49,7 +49,7 @@
     "step": {
       "init": {
         "title": "PV History Forecast Options",
-        "description": "Update sensors and settings",
+        "description": "Update sensors and settings\n\n{weather_history_warning}",
         "data": {
           "weather_entity": "Weather Entity (e.g. weather.forecast_home)",
           "sensor_clouds": "Cloud Coverage Sensor (leave empty = auto-sensor)",

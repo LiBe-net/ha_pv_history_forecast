@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -205,12 +205,15 @@ async def async_setup_entry(
     # Mirrors cloud_coverage from the weather entity so HA accumulates LTS statistics.
     # The SQL 3rd UNION provides weather entity fallback from day 1 until LTS is built up.
     effective_cloud = options.get(CONF_SENSOR_CLOUDS, data.get(CONF_SENSOR_CLOUDS, ""))
+    forecast_sensor_entity_id = f"sensor.{prefix}_weather_forecast"
     if effective_cloud == f"sensor.{prefix}_cloud_coverage":
         cloud_entity = CloudCoverageSensor(
             hass=hass,
             config_entry=config_entry,
             name=f"{prefix}_cloud_coverage",
             weather_entity=data.get(CONF_WEATHER_ENTITY, ""),
+            forecast_sensor_entity_id=forecast_sensor_entity_id,
+            coordinator=coordinator,
         )
         entities.append(cloud_entity)
 
@@ -224,6 +227,8 @@ async def async_setup_entry(
             config_entry=config_entry,
             name=f"{prefix}_uv",
             weather_entity=data.get(CONF_WEATHER_ENTITY, ""),
+            forecast_sensor_entity_id=forecast_sensor_entity_id,
+            coordinator=coordinator,
         )
         entities.append(uv_entity)
 
@@ -653,6 +658,51 @@ class WeatherForecastSensor(CoordinatorEntity, SensorEntity):
         return self.coordinator.last_update_success
 
 
+def _nearest_forecast_value(
+    hass: HomeAssistant, forecast_sensor_entity_id: str, field: str
+) -> float | None:
+    """Return the value of *field* from the forecast entry closest to now (state machine)."""
+    forecast_state = hass.states.get(forecast_sensor_entity_id)
+    if forecast_state is None:
+        return None
+    return _nearest_forecast_field(forecast_state.attributes.get("forecast", []), field)
+
+
+def _nearest_forecast_field(forecast_list: list, field: str) -> float | None:
+    """Return the value of *field* from the forecast entry closest to now.
+
+    Works directly on a forecast list so it can be called before the
+    WeatherForecastSensor has written its state to hass.states.
+    Skips entries whose value for *field* is explicitly null.
+    Returns None when no valid entry is found.
+    """
+    if not forecast_list:
+        return None
+    now_ts = datetime.now(tz=timezone.utc).timestamp()
+    best_value: float | None = None
+    best_delta = float("inf")
+    for entry in forecast_list:
+        raw = entry.get(field)
+        if raw is None:
+            continue
+        try:
+            value = float(raw)
+        except (ValueError, TypeError):
+            continue
+        dt_str = entry.get("datetime", "")
+        try:
+            dt = datetime.fromisoformat(dt_str)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            delta = abs(dt.timestamp() - now_ts)
+        except (ValueError, TypeError):
+            delta = float("inf")
+        if delta < best_delta:
+            best_delta = delta
+            best_value = value
+    return best_value
+
+
 class CloudCoverageSensor(SensorEntity):
     """Cloud Coverage Sensor that mirrors the weather entity's cloud_coverage attribute.
 
@@ -672,6 +722,8 @@ class CloudCoverageSensor(SensorEntity):
         config_entry: ConfigEntry,
         name: str,
         weather_entity: str,
+        forecast_sensor_entity_id: str | None = None,
+        coordinator: WeatherCoordinator | None = None,
     ) -> None:
         """Initialize the sensor."""
         self.hass = hass
@@ -681,23 +733,59 @@ class CloudCoverageSensor(SensorEntity):
         self._attr_native_value = None
         self._attr_available = False
         self._weather_entity = weather_entity
+        self._forecast_sensor_entity_id = forecast_sensor_entity_id
+        self._coordinator = coordinator
         self.entity_id = generate_entity_id("sensor.{}", name, hass=hass)
 
     async def async_update(self) -> None:
-        """Read cloud_coverage from the weather entity attributes."""
+        """Read cloud_coverage, preferring coordinator forecast data.
+
+        Priority order:
+        1. Nearest entry in coordinator.data['forecast'] (independent of the
+           weather entity state — avoids OWM startup-unavailable race condition).
+        2. Direct cloud_coverage attribute on the weather entity current state.
+        3. Nearest entry via state machine WeatherForecastSensor (no-coordinator
+           fallback).
+        """
+        # 1. Coordinator forecast (most reliable — already fetched before entity setup)
+        if self._coordinator and self._coordinator.data:
+            cloud_coverage = _nearest_forecast_field(
+                self._coordinator.data.get("forecast", []), "cloud_coverage"
+            )
+            if cloud_coverage is not None:
+                try:
+                    self._attr_native_value = float(cloud_coverage)
+                    self._attr_available = True
+                    return
+                except (ValueError, TypeError):
+                    pass
+
+        # 2. Direct weather entity state attribute
         state = self.hass.states.get(self._weather_entity)
-        if state is None or state.state in ("unknown", "unavailable", ""):
-            self._attr_available = False
-            return
-        cloud_coverage = state.attributes.get("cloud_coverage")
-        if cloud_coverage is not None:
-            try:
-                self._attr_native_value = float(cloud_coverage)
-                self._attr_available = True
-            except (ValueError, TypeError):
-                self._attr_available = False
-        else:
-            self._attr_available = False
+        if state is not None and state.state not in ("unknown", "unavailable", ""):
+            cloud_coverage = state.attributes.get("cloud_coverage")
+            if cloud_coverage is not None:
+                try:
+                    self._attr_native_value = float(cloud_coverage)
+                    self._attr_available = True
+                    return
+                except (ValueError, TypeError):
+                    pass
+
+        # 3. State-machine WeatherForecastSensor (fallback when coordinator is None)
+        if self._forecast_sensor_entity_id:
+            cloud_coverage = _nearest_forecast_value(
+                self.hass, self._forecast_sensor_entity_id, "cloud_coverage"
+            )
+            if cloud_coverage is not None:
+                try:
+                    self._attr_native_value = float(cloud_coverage)
+                    self._attr_available = True
+                    return
+                except (ValueError, TypeError):
+                    pass
+
+        self._attr_available = False
 
     @property
     def should_poll(self) -> bool:
@@ -723,6 +811,8 @@ class UVIndexSensor(SensorEntity):
         config_entry: ConfigEntry,
         name: str,
         weather_entity: str,
+        forecast_sensor_entity_id: str | None = None,
+        coordinator: WeatherCoordinator | None = None,
     ) -> None:
         """Initialize the sensor."""
         self.hass = hass
@@ -732,21 +822,63 @@ class UVIndexSensor(SensorEntity):
         self._attr_native_value = None
         self._attr_available = False
         self._weather_entity = weather_entity
+        self._forecast_sensor_entity_id = forecast_sensor_entity_id
+        self._coordinator = coordinator
         self.entity_id = generate_entity_id("sensor.{}", name, hass=hass)
 
     async def async_update(self) -> None:
-        """Read uv_index from the weather entity attributes."""
-        state = self.hass.states.get(self._weather_entity)
-        if state is None or state.state in ("unknown", "unavailable", ""):
-            self._attr_available = False
-            return
-        uv_index = state.attributes.get("uv_index")
+        """Read uv_index, preferring coordinator forecast data.
+
+        Priority order:
+        1. Nearest entry in coordinator.data['forecast'] (independent of the
+           weather entity state — avoids OWM startup-unavailable race condition).
+        2. Direct uv_index attribute on the weather entity current state.
+        3. Nearest entry via state machine WeatherForecastSensor (no-coordinator
+           fallback).
+        When no UV data is found at all (e.g. OWM free tier: all null), the
+        sensor reports 0.0 so HA accumulates LTS statistics and Jinja templates
+        disable UV weighting automatically (guard: {% if f_uv_avg > 0 %}).
+        """
+        uv_index: float | None = None
+
+        # 1. Coordinator forecast
+        if self._coordinator and self._coordinator.data:
+            uv_index = _nearest_forecast_field(
+                self._coordinator.data.get("forecast", []), "uv_index"
+            )
+
+        # 2. Direct weather entity state attribute
+        if uv_index is None:
+            state = self.hass.states.get(self._weather_entity)
+            if state is not None and state.state not in ("unknown", "unavailable", ""):
+                raw = state.attributes.get("uv_index")
+                if raw is not None:
+                    try:
+                        uv_index = float(raw)
+                    except (ValueError, TypeError):
+                        pass
+
+        # 3. State-machine WeatherForecastSensor
+        if uv_index is None and self._forecast_sensor_entity_id:
+            uv_index = _nearest_forecast_value(
+                self.hass, self._forecast_sensor_entity_id, "uv_index"
+            )
+
+        # If no UV data from any source (OWM free tier: all null) → report 0.0
+        # so the sensor stays available and LTS statistics keep accumulating.
+        # The coordinator itself must be reachable; if we have no coordinator AND
+        # the weather entity is completely unknown, stay unavailable.
+        if uv_index is None:
+            if self._coordinator and self._coordinator.data is not None:
+                uv_index = 0.0
+            else:
+                state = self.hass.states.get(self._weather_entity)
+                if state is not None and state.state not in ("unknown", "unavailable", ""):
+                    uv_index = 0.0
+
         if uv_index is not None:
-            try:
-                self._attr_native_value = float(uv_index)
-                self._attr_available = True
-            except (ValueError, TypeError):
-                self._attr_available = False
+            self._attr_native_value = uv_index
+            self._attr_available = True
         else:
             self._attr_available = False
 

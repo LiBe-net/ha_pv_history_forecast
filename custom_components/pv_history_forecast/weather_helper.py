@@ -2,9 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
-from homeassistant.components.template import Template
 from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
@@ -57,36 +55,3 @@ async def ensure_weather_forecast_template(
     
     return False
 
-
-def get_weather_forecast_template_config() -> dict[str, Any]:
-    """Get the weather forecast template configuration."""
-    return {
-        "trigger": [
-            {
-                "platform": "time_pattern",
-                "minutes": "/15",
-            }
-        ],
-        "action": [
-            {
-                "service": "weather.get_forecasts",
-                "data": {
-                    "type": "hourly",
-                },
-                "target": {
-                    "entity_id": "weather.forecast_home",  # Customize this
-                },
-                "response_variable": "hourly",
-            }
-        ],
-        "sensor": [
-            {
-                "name": "weather_forecast_hourly",
-                "unique_id": "weather_forecast_hourly",
-                "state": "{{ now().isoformat() }}",
-                "attributes": {
-                    "forecast": "{{ hourly['weather.forecast_home'].forecast }}",  # Customize this
-                },
-            }
-        ],
-    }
