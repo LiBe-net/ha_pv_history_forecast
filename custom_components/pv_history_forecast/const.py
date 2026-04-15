@@ -115,7 +115,7 @@ DEFAULT_VALUE_TEMPLATE = """{# PV FORECAST: Remaining yield today, weighted aver
     {% endif %}
 
     {# --- 6. FINAL SCALING --- #}
-    {% set final_val = (res / (1000 if res > 200 else 1)) * snow_factor_today %}
+    {% set final_val = res * snow_factor_today %}
     {{ final_val | round(2) }}
 
   {% endif %}
@@ -176,7 +176,7 @@ DEFAULT_VALUE_TEMPLATE_MIN = """{# PV-PROGNOSE MINIMUM: Pessimistischer Tagesres
         {% set res = top5 | map(attribute='y_korr') | min %}
       {% endif %}
     {% endif %}
-    {{ (res / (1000 if res > 200 else 1)) | round(2) }}
+    {{ res | round(2) }}
   {% endif %}
 {% else %}
   0.0
@@ -222,7 +222,7 @@ DEFAULT_VALUE_TEMPLATE_MAX = """{# PV-PROGNOSE MAXIMUM: Optimistischer Tagesrest
     {% endfor %}
     {% set top5 = (ns_pool.items | sort(attribute='diff'))[:5] %}
     {% set max_yield = top5 | map(attribute='y_korr') | max if top5 | count > 0 else 0 %}
-    {{ (max_yield / (1000 if max_yield > 200 else 1)) | round(2) }}
+    {{ max_yield | round(2) }}
   {% endif %}
 {% else %}
   0.0
@@ -287,7 +287,7 @@ DEFAULT_VALUE_TEMPLATE_TOMORROW = """{# PV FORECAST TOMORROW: Total yield tomorr
     {% endfor %}
     {% set res = ns_mix.ws / (ns_top.total_w if ns_top.total_w > 0 else 1) %}
   {% endif %}
-  {{ (res / (1000 if res > 200 else 1)) | round(2) }}
+  {{ res | round(2) }}
 {% else %}
   0.0
 {% endif %}"""
@@ -364,6 +364,10 @@ DEFAULT_SQL_QUERY = """WITH vars AS (
         '{sensor_uv}' as sensor_uv,
         '{weather_entity}' as weather_entity,
         (strftime('%s', 'now', 'localtime') - strftime('%s', 'now')) || ' seconds' as offset,
+        /* Divide Wh values by 1000 to get kWh for output.
+           HA stores statistics in the sensor's native unit.
+           statistics_meta.unit_of_measurement reflects the stored unit:
+           'Wh' → divide by 1000; 'kWh' or anything else → no division. */
         COALESCE(
             CASE WHEN (SELECT unit_of_measurement FROM statistics_meta
                        WHERE statistic_id = '{sensor_pv}' LIMIT 1) = 'Wh'
@@ -704,14 +708,13 @@ DEFAULT_LOVELACE_TEMPLATE_REMAINING_TODAY = """{#- Remaining-today table only (n
       {% endfor %}
       {% set res = ns_mix.ws / (ns_top.total_w if ns_top.total_w > 0 else 1) %}
     {% endif %}
-    {% set scale = 1000 if res > 200 else 1 %}
 | date | clouds | uv | rem. yield | weight |
 | :--- | :---: | :---: | :---: | :---: |
 {%- for item in top15 %}
-| {{ item.date }} | {{ item.h_avg }}%{% if item.filtered %} ❌{% endif %} | {{ item.uv_avg | round(1) }} | **{{ ((item.y_korr * snow_factor_today) / scale) | round(2) }} kWh** <small>({{ item.s_fakt | round(2) }}x)</small> | {{ (((item.w / ns_top.total_w) * 100) if ns_top.total_w > 0 else 0) | round(1) }}% |
+| {{ item.date }} | {{ item.h_avg }}%{% if item.filtered %} ❌{% endif %} | {{ item.uv_avg | round(1) }} | **{{ (item.y_korr * snow_factor_today) | round(2) }} kWh** <small>({{ item.s_fakt | round(2) }}x)</small> | {{ (((item.w / ns_top.total_w) * 100) if ns_top.total_w > 0 else 0) | round(1) }}% |
 {%- endfor %}
   {% endif %}
-{% endif %}{% if data | length > 0 %}Info: showing 15 out of {{ data | length }} days. Forecast basis: {{ f_avg }}% clouds, {{ f_uv_avg | round(1) }} uv. {% endif %}"""
+{% endif %}{% if data | length > 0 %}Info: showing {{ top15 | length }} out of {{ data | length }} days. Forecast basis: {{ f_avg }}% clouds, {{ f_uv_avg | round(1) }} uv. {% endif %}"""
 
 DEFAULT_LOVELACE_TEMPLATE_TOMORROW = """{#- Tomorrow full-day table only (no headlines) -#}
 {% if raw_json and raw_json != '[]' and raw_json is not none %}
@@ -768,11 +771,10 @@ DEFAULT_LOVELACE_TEMPLATE_TOMORROW = """{#- Tomorrow full-day table only (no hea
       {% endfor %}
       {% set res = ns_mix.ws / (ns_top.total_w if ns_top.total_w > 0 else 1) %}
     {% endif %}
-    {% set scale = 1000 if res > 200 else 1 %}
 | date | clouds | uv | day yield  | weight |
 | :--- | :---: | :---: | :---:  | :---: |
 {%- for item in top15 %}
-| {{ item.date }} | {{ item.h_avg }}% | {{ item.uv_avg | round(1) }} | **{{ (item.y_korr / scale) | round(2) }} kWh** <small><small>({{ item.s_fakt | round(2) }}x)</small></small> | {{ (((item.w / ns_top.total_w) * 100) if ns_top.total_w > 0 else 0) | round(1) }}% |
+| {{ item.date }} | {{ item.h_avg }}% | {{ item.uv_avg | round(1) }} | **{{ item.y_korr | round(2) }} kWh** <small><small>({{ item.s_fakt | round(2) }}x)</small></small> | {{ (((item.w / ns_top.total_w) * 100) if ns_top.total_w > 0 else 0) | round(1) }}% |
 {%- endfor %}
   {% endif %}
-{% endif %}{% if data | length > 0 %}Info: showing 15 out of {{ data | length }} days. Forecast basis: {{ f_avg_tomorrow }}% clouds, {{ f_uv_avg_tomorrow | round(1) }} uv. {% endif %}"""
+{% endif %}{% if data | length > 0 %}Info: showing {{ top15 | length }} out of {{ data | length }} days. Forecast basis: {{ f_avg_tomorrow }}% clouds, {{ f_uv_avg_tomorrow | round(1) }} uv. {% endif %}"""

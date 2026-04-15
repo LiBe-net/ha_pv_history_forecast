@@ -20,7 +20,7 @@ based on historical yield data from the Home Assistant database.
 4. **Settings → Devices & Services** → Add **PV History Forecast**
 
 ## Lovelace Card
-
+Want to see what's going on? Simply add a Markdown card to get an overview of how the data is generated:
 ```yaml
 type: markdown
 content: >-
@@ -38,6 +38,7 @@ content: >-
   
   {{ state_attr('sensor.pv_hist_remaining_today', 'lovelace_card_tomorrow') }}
 ```
+If you are not using the default prefix, you will need to adjust the names.
 ## License
 
 MIT — see [LICENSE](LICENSE)

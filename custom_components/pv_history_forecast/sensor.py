@@ -123,14 +123,14 @@ async def async_setup_entry(
         hass=hass,
         config_entry=config_entry,
         main_entity_id=main_entity_id,
-        name=f"{prefix}_remaining_min",
+        name=f"{prefix}_remaining_today_min",
         value_template=DEFAULT_VALUE_TEMPLATE_MIN,
     )
     max_sensor = PVForecastTemplateSensor(
         hass=hass,
         config_entry=config_entry,
         main_entity_id=main_entity_id,
-        name=f"{prefix}_remaining_max",
+        name=f"{prefix}_remaining_today_max",
         value_template=DEFAULT_VALUE_TEMPLATE_MAX,
     )
     tomorrow_sensor = PVForecastTemplateSensor(

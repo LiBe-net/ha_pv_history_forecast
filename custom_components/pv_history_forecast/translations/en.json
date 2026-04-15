@@ -3,10 +3,9 @@
     "step": {
       "user": {
         "title": "PV History Forecast",
-        "description": "The prefix defines the names of all sensors created (e.g. \"pv_hist\" → sensor.pv_hist_remaining_today / _min / _max / _tomorrow). Leave the database URL empty for the default HA database.",
+        "description": "The prefix defines the names of all sensors created (e.g. \"pv_hist\" → sensor.pv_hist_remaining_today / _min / _max / _tomorrow). The default Home Assistant SQLite database is used automatically.",
         "data": {
-          "sensor_prefix": "Sensor prefix (e.g. pv_hist)",
-          "db_url": "Database URL (optional — leave empty to use the default Home Assistant database)"
+          "sensor_prefix": "Sensor prefix (e.g. pv_hist)"
         }
       },
       "reconfigure": {
@@ -33,13 +32,15 @@
       }
     },
     "error": {
-      "invalid_db_url": "Invalid database URL or connection failed",
-      "sqlite_required": "Only SQLite is supported! URL must start with 'sqlite://'.",
+      "invalid_db_url": "Could not access the Home Assistant recorder. Make sure the recorder integration is active.",
+      "sqlite_required": "Home Assistant is not using a SQLite database. This integration only supports SQLite.",
       "weather_entity_required": "Weather entity is required",
       "sensor_pv_required": "PV panel energy sensor is required",
       "must_be_weather_entity": "Please select a weather entity from the list (weather.*)",
       "must_be_sensor_entity": "Please select a sensor from the list (sensor.*)",
-      "sensor_pv_wrong_unit": "The PV sensor must use kWh or Wh as its unit (device class: energy)"
+      "sensor_pv_wrong_unit": "The PV sensor must use kWh or Wh as its unit (device class: energy)",
+      "no_cloud_forecast": "The weather entity does not provide cloud_coverage data in its forecast. Without cloud data the PV forecast cannot work. Please choose a different weather provider.",
+      "no_forecast_support": "The selected weather entity does not support the weather.get_forecasts action. Please select a different weather entity (e.g. from the built-in weather integration or OpenWeatherMap)."
     },
     "abort": {
       "already_configured": "This configuration already exists"

@@ -3,10 +3,9 @@
     "step": {
       "user": {
         "title": "PV History Forecast",
-        "description": "Der Präfix bestimmt alle Sensor-Namen (z.B. \"pv_hist\" → sensor.pv_hist_remaining_today / _min / _max / _tomorrow). Datenbank-URL leer lassen für Standard-HA-Datenbank.",
+        "description": "Der Präfix bestimmt alle Sensor-Namen (z.B. \"pv_hist\" → sensor.pv_hist_remaining_today / _min / _max / _tomorrow). Die Standard-Home-Assistant SQLite-Datenbank wird automatisch verwendet.",
         "data": {
-          "sensor_prefix": "Sensor-Präfix (z.B. pv_hist)",
-          "db_url": "SQLite Datenbankverbindungs-URL (z.B. sqlite:////config/sqlpvforecast.db)"
+          "sensor_prefix": "Sensor-Präfix (z.B. pv_hist)"
         }
       },
       "reconfigure": {
@@ -32,9 +31,11 @@
       }
     },
     "error": {
-      "invalid_db_url": "Ungültige Datenbankverbindungs-URL oder Verbindung fehlgeschlagen",
-      "sqlite_required": "Nur SQLite wird unterstützt! URL muss mit 'sqlite://' beginnen.",
-      "sensor_pv_wrong_unit": "Der PV-Sensor muss die Einheit kWh oder Wh haben (Geräte-Klasse: energy)"
+      "invalid_db_url": "Auf den Home Assistant Recorder konnte nicht zugegriffen werden. Stelle sicher, dass die Recorder-Integration aktiv ist.",
+      "sqlite_required": "Home Assistant verwendet keine SQLite-Datenbank. Diese Integration unterstützt nur SQLite.",
+      "sensor_pv_wrong_unit": "Der PV-Sensor muss die Einheit kWh oder Wh haben (Geräte-Klasse: energy)",
+      "no_cloud_forecast": "Die Wetter-Entity liefert keine cloud_coverage-Daten in der Vorhersage. Ohne Cloud-Daten kann der PV-Forecast nicht funktionieren. Bitte einen anderen Wetter-Anbieter wählen.",
+      "no_forecast_support": "Die gewählte Wetter-Entity unterstützt die Aktion weather.get_forecasts nicht. Bitte eine andere Wetter-Entity auswählen (z.B. von der integrierten Wetterintegration oder OpenWeatherMap)."
     },
     "abort": {
       "already_configured": "Diese Konfiguration existiert bereits"
