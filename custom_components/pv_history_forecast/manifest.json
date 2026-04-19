@@ -1,13 +1,12 @@
 {
-  "manifest_version": 1,
   "domain": "pv_history_forecast",
   "name": "PV History Forecast",
   "codeowners": ["@LiBe-net"],
   "config_flow": true,
   "documentation": "https://github.com/LiBe-net/ha_pv_history_forecast",
   "issue_tracker": "https://github.com/LiBe-net/ha_pv_history_forecast/issues",
-  "version": "0.2.0",
+  "iot_class": "local_polling",
+  "version": "0.2.1",
   "requirements": ["sqlalchemy>=1.4.0"],
-  "homeassistant": "2024.1.0",
-  "icon": "mdi:solar-power-variant"
+  "after_dependencies": ["recorder"]
 }
