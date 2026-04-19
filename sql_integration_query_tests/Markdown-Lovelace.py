@@ -43,7 +43,7 @@
     {% set decl = -0.4093 * cos(2 * pi * (doy + 10) / 365) %}
     {% set cos_ha = -tan(lat_rad) * tan(decl) %}
     {% set dl_today = 24 / pi * acos([[cos_ha, -1.0] | max, 1.0] | min) %}
-    {% set sun_today = 0.65 + 0.35 * cos((doy - 172) * 2 * pi / 365) %}
+    {% set sun_today = 0.80 + 0.20 * cos((doy - 172) * 2 * pi / 365) %}
 
     {# 3. POOL AUFBAUEN #}
     {% set ns_pool = namespace(items=[], total_w=0) %}
@@ -58,7 +58,7 @@
         {% set decl_i = -0.4093 * cos(2 * pi * (item_day + 10) / 365) %}
         {% set cos_ha_i = -tan(lat_rad) * tan(decl_i) %}
         {% set dl_item = 24 / pi * acos([[cos_ha_i, -1.0] | max, 1.0] | min) %}
-        {% set sun_item = 0.65 + 0.35 * cos((item_day - 172) * 2 * pi / 365) %}
+        {% set sun_item = 0.80 + 0.20 * cos((item_day - 172) * 2 * pi / 365) %}
         {% set s_korr = (sun_today / sun_item) * (dl_today / dl_item) %}
         {% set diff_c = (clouds - f_avg) | abs %}
         {% if f_uv_avg > 0 %}

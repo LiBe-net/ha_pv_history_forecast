@@ -16,7 +16,7 @@
     {% set lat_rad = latitude * pi / 180 %}
     {% set decl = -0.4093 * cos(2 * pi * (doy + 10) / 365) %}
     {% set dl_today = 24 / pi * acos([[(-tan(lat_rad) * tan(decl)), -1.0] | max, 1.0] | min) %}
-    {% set sun_today = 0.65 + 0.35 * cos((doy - 172) * 2 * pi / 365) %}
+    {% set sun_today = 0.80 + 0.20 * cos((doy - 172) * 2 * pi / 365) %}
     {% set ns_pool = namespace(items=[]) %}
     {% for item in data %}
       {% set dt_item = as_datetime(item.date) %}
@@ -24,7 +24,7 @@
         {% set item_day = dt_item.strftime('%j') | int(default=1) %}
         {% set decl_i = -0.4093 * cos(2 * pi * (item_day + 10) / 365) %}
         {% set dl_item = 24 / pi * acos([[(-tan(lat_rad) * tan(decl_i)), -1.0] | max, 1.0] | min) %}
-        {% set sun_item = 0.65 + 0.35 * cos((item_day - 172) * 2 * pi / 365) %}
+        {% set sun_item = 0.80 + 0.20 * cos((item_day - 172) * 2 * pi / 365) %}
         {% set s_korr = (sun_today / sun_item) * (dl_today / dl_item) %}
         {% set yield_korr = item.yield_day_remaining | float(default=0) * s_korr %}
         {% set uv_hist = item.uv_avg_remaining | float(default=0) %}

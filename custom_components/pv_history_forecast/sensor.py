@@ -33,6 +33,7 @@ from .const import (
     CONF_UNIT_OF_MEASUREMENT,
     CONF_DEVICE_CLASS,
     CONF_STATE_CLASS,
+    CONF_PV_MAX_RECORD,
     DEFAULT_SENSOR_PREFIX,
     DEFAULT_VALUE_TEMPLATE,
     DEFAULT_VALUE_TEMPLATE_MIN,
@@ -46,6 +47,7 @@ from .const import (
     DEFAULT_UNIT_OF_MEASUREMENT,
     DEFAULT_DEVICE_CLASS,
     DEFAULT_STATE_CLASS,
+    DEFAULT_PV_MAX_RECORD,
     DOMAIN,
 )
 from .coordinator import WeatherCoordinator
@@ -76,7 +78,9 @@ async def async_setup_entry(
     # This ensures any update to DEFAULT_SQL_QUERY (new CTEs, fallback UNIONs etc.)
     # takes effect immediately without the user needing to reconfigure.
     sensor_clouds = options.get(CONF_SENSOR_CLOUDS, data.get(CONF_SENSOR_CLOUDS, ""))
-    sensor_pv = options.get(CONF_SENSOR_PV, data.get(CONF_SENSOR_PV, ""))
+    sensor_pv = options.get(CONF_SENSOR_PV, data.get(CONF_SENSOR_PV, []))
+    if isinstance(sensor_pv, str):
+        sensor_pv = [sensor_pv] if sensor_pv else []
     sensor_forecast = options.get(CONF_SENSOR_FORECAST, data.get(CONF_SENSOR_FORECAST, forecast_entity_id))
     sensor_uv = options.get(CONF_SENSOR_UV, data.get(CONF_SENSOR_UV, ""))
     if not sensor_uv:
@@ -85,9 +89,12 @@ async def async_setup_entry(
     history_days = options.get(CONF_PV_HISTORY_DAYS, data.get(CONF_PV_HISTORY_DAYS, 30))
     weather_entity = options.get(CONF_WEATHER_ENTITY) or data.get(CONF_WEATHER_ENTITY, "")
     try:
+        _pv_sql_list = ", ".join(f"'{s}'" for s in sensor_pv)
+        _pv_first = sensor_pv[0] if sensor_pv else ""
         sql_query = DEFAULT_SQL_QUERY.format(
             sensor_clouds=sensor_clouds,
-            sensor_pv=sensor_pv,
+            sensor_pv_list=_pv_sql_list,
+            sensor_pv_first=_pv_first,
             sensor_forecast=sensor_forecast,
             sensor_uv=sensor_uv,
             history_days=history_days,
@@ -275,7 +282,7 @@ class SQLPVForecastSensor(SensorEntity):
         name: str,
         db_url: str,
         sensor_clouds: str,
-        sensor_pv: str,
+        sensor_pv: list[str] | str,
         sensor_forecast: str,
         pv_history_days: int,
         value_template: str,
@@ -331,11 +338,13 @@ class SQLPVForecastSensor(SensorEntity):
                 self._sql_query = text(self._sql_query_template)
             else:
                 # Fallback auf einfache Query wenn keine Template vorhanden
+                _pv = self._sensor_pv
+                _pv_first = (_pv[0] if isinstance(_pv, list) and _pv else _pv) or ""
                 query_str = f"""
 WITH vars AS (
     SELECT 
         '{self._sensor_clouds}' as sensor_clouds,
-        '{self._sensor_pv}' as sensor_pv,
+        '{_pv_first}' as sensor_pv,
         '{self._sensor_forecast}' as sensor_forecast
 )
 SELECT json_object(
@@ -347,7 +356,7 @@ SELECT json_object(
 FROM vars
                 """
                 self._sql_query = text(query_str)
-            
+
             _LOGGER.debug(
                 "SQL Query rebuilt with sensors: clouds=%s, pv=%s, forecast=%s",
                 self._sensor_clouds, self._sensor_pv, self._sensor_forecast
@@ -441,9 +450,13 @@ FROM vars
         """Apply value template to the raw SQL result string."""
         try:
             template = Template(self._value_template_str, self.hass)
+            options = self.config_entry.options or {}
+            data = self.config_entry.data
+            pv_max = float(options.get(CONF_PV_MAX_RECORD, data.get(CONF_PV_MAX_RECORD, DEFAULT_PV_MAX_RECORD)))
             rendered = template.async_render({
                 "value": raw_value,
                 "latitude": self.hass.config.latitude,
+                "pv_max_record": pv_max,
             })
             try:
                 return float(rendered)
@@ -534,9 +547,13 @@ class PVForecastTemplateSensor(SensorEntity):
         """Apply value template with latitude variable."""
         try:
             template = Template(self._value_template_str, self.hass)
+            options = self.config_entry.options or {}
+            data = self.config_entry.data
+            pv_max = float(options.get(CONF_PV_MAX_RECORD, data.get(CONF_PV_MAX_RECORD, DEFAULT_PV_MAX_RECORD)))
             rendered = template.async_render({
                 "value": raw_value,
                 "latitude": self.hass.config.latitude,
+                "pv_max_record": pv_max,
             })
             try:
                 return float(rendered)
@@ -592,7 +609,10 @@ class ForecastMethodSensor(SensorEntity):
         raw = main_state.attributes["json"]
         try:
             template = Template(self._value_template_str, self.hass)
-            rendered = template.async_render({"value": raw, "latitude": self.hass.config.latitude})
+            options = self.config_entry.options or {}
+            data = self.config_entry.data
+            pv_max = float(options.get(CONF_PV_MAX_RECORD, data.get(CONF_PV_MAX_RECORD, DEFAULT_PV_MAX_RECORD)))
+            rendered = template.async_render({"value": raw, "latitude": self.hass.config.latitude, "pv_max_record": pv_max})
             value = str(rendered).strip()
             if value:
                 self._attr_native_value = value

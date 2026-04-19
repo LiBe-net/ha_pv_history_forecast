@@ -15,7 +15,7 @@
   {% set lat_rad = latitude * pi / 180 %}
   {% set decl_tomorrow = -0.4093 * cos(2 * pi * (day_tomorrow + 10) / 365) %}
   {% set dl_tomorrow = 24 / pi * acos([[(-tan(lat_rad) * tan(decl_tomorrow)), -1.0] | max, 1.0] | min) %}
-  {% set sun_tomorrow = 0.65 + 0.35 * cos((day_tomorrow - 172) * 2 * pi / 365) %}
+  {% set sun_tomorrow = 0.80 + 0.20 * cos((day_tomorrow - 172) * 2 * pi / 365) %}
 
   {# --- 3. POOL MATCHING (HISTORICAL COMPARISON) --- #}
   {# Compare tomorrow's forecast with total yields from history #}
@@ -29,7 +29,7 @@
       {% set item_day = dt_item.strftime('%j') | int(default=1) %}
       {% set decl_i = -0.4093 * cos(2 * pi * (item_day + 10) / 365) %}
       {% set dl_item = 24 / pi * acos([[(-tan(lat_rad) * tan(decl_i)), -1.0] | max, 1.0] | min) %}
-      {% set sun_item = 0.65 + 0.35 * cos((item_day - 172) * 2 * pi / 365) %}
+      {% set sun_item = 0.80 + 0.20 * cos((item_day - 172) * 2 * pi / 365) %}
       {% set s_korr = (sun_tomorrow / sun_item) * (dl_tomorrow / dl_item) %}
       {% set uv_hist = item.uv_avg_total | float(default=0) %}
       {# Weighting: combined cloud + UV distance #}

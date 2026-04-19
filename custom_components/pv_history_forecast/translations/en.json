@@ -16,7 +16,7 @@
           "sensor_clouds": "Cloud Coverage Sensor (Optional — leave empty: auto-sensor is kept, works from day 1)",
           "sensor_uv": "UV Index Sensor (Optional — leave empty: auto-sensor is kept)",
           "pv_history_days": "Days of cloud history (default: 30)",
-          "sensor_pv": "PV Panel Energy Sensor (e.g. sensor.pv_panels_energy)"
+          "sensor_pv": "PV Panel Energy Sensors (select one or more) — e.g. sensor.pv_east_energy, sensor.pv_west_energy"
         }
       },
       "sensors": {
@@ -27,7 +27,7 @@
           "sensor_clouds": "Cloud Coverage Sensor (Optional — leave empty: auto-sensor is created automatically, works from day 1)",
           "sensor_uv": "UV Index Sensor (Optional — leave empty: auto-sensor is created automatically)",
           "pv_history_days": "Days of cloud history to use (only applies when a cloud coverage sensor is selected above; default: 30)",
-          "sensor_pv": "PV Panel Energy Sensor (e.g. sensor.pv_panels_energy)"
+          "sensor_pv": "PV Panel Energy Sensors (select one or more) — e.g. sensor.pv_east_energy, sensor.pv_west_energy"
         }
       }
     },
@@ -35,10 +35,10 @@
       "invalid_db_url": "Could not access the Home Assistant recorder. Make sure the recorder integration is active.",
       "sqlite_required": "Home Assistant is not using a SQLite database. This integration only supports SQLite.",
       "weather_entity_required": "Weather entity is required",
-      "sensor_pv_required": "PV panel energy sensor is required",
+      "sensor_pv_required": "At least one PV panel energy sensor is required",
       "must_be_weather_entity": "Please select a weather entity from the list (weather.*)",
       "must_be_sensor_entity": "Please select a sensor from the list (sensor.*)",
-      "sensor_pv_wrong_unit": "The PV sensor must use kWh or Wh as its unit (device class: energy)",
+      "sensor_pv_wrong_unit": "All PV sensors must use kWh or Wh as their unit (device class: energy)",
       "no_cloud_forecast": "The weather entity does not provide cloud_coverage data in its forecast. Without cloud data the PV forecast cannot work. Please choose a different weather provider.",
       "no_forecast_support": "The selected weather entity does not support the weather.get_forecasts action. Please select a different weather entity (e.g. from the built-in weather integration or OpenWeatherMap)."
     },
@@ -56,7 +56,7 @@
           "sensor_clouds": "Cloud Coverage Sensor (leave empty = auto-sensor)",
           "sensor_uv": "UV Index Sensor (leave empty = auto-sensor)",
           "pv_history_days": "Cloud history days",
-          "sensor_pv": "PV Panel Energy Sensor"
+          "sensor_pv": "PV Panel Energy Sensors"
         }
       }
     }

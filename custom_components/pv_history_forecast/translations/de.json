@@ -16,7 +16,7 @@
           "sensor_clouds": "Cloud Coverage Sensor (Optional — leer lassen: Auto-Sensor wird beibehalten, ab Tag 1 nutzbar)",
           "sensor_uv": "UV Index Sensor (Optional — leer lassen: Auto-Sensor wird beibehalten)",
           "pv_history_days": "Tage Cloud-Verlauf (Standard: 30)",
-          "sensor_pv": "PV Panel Energie Sensor (z.B. sensor.pv_panels_energy)"
+          "sensor_pv": "PV Panel Energie Sensoren (einen oder mehrere auswählen) — z.B. sensor.pv_ost_energie, sensor.pv_west_energie"
         }
       },
       "sensors": {
@@ -26,14 +26,14 @@
           "weather_entity": "Wetter Entity (Pflicht) - z.B. weather.forecast_home",
           "sensor_clouds": "Cloud Coverage Sensor (Optional — leer lassen: Auto-Sensor wird automatisch angelegt, ab Tag 1 nutzbar)",
           "sensor_uv": "UV Index Sensor (Optional — leer lassen: Auto-Sensor wird automatisch angelegt)",
-          "sensor_pv": "PV Panel Energie Sensor (z.B. sensor.pv_panels_energy)"
+          "sensor_pv": "PV Panel Energie Sensoren (einen oder mehrere auswählen) — z.B. sensor.pv_ost_energie, sensor.pv_west_energie"
         }
       }
     },
     "error": {
       "invalid_db_url": "Auf den Home Assistant Recorder konnte nicht zugegriffen werden. Stelle sicher, dass die Recorder-Integration aktiv ist.",
       "sqlite_required": "Home Assistant verwendet keine SQLite-Datenbank. Diese Integration unterstützt nur SQLite.",
-      "sensor_pv_wrong_unit": "Der PV-Sensor muss die Einheit kWh oder Wh haben (Geräte-Klasse: energy)",
+      "sensor_pv_wrong_unit": "Alle PV-Sensoren müssen die Einheit kWh oder Wh haben (Geräte-Klasse: energy)",
       "no_cloud_forecast": "Die Wetter-Entity liefert keine cloud_coverage-Daten in der Vorhersage. Ohne Cloud-Daten kann der PV-Forecast nicht funktionieren. Bitte einen anderen Wetter-Anbieter wählen.",
       "no_forecast_support": "Die gewählte Wetter-Entity unterstützt die Aktion weather.get_forecasts nicht. Bitte eine andere Wetter-Entity auswählen (z.B. von der integrierten Wetterintegration oder OpenWeatherMap)."
     },
@@ -51,7 +51,7 @@
           "sensor_clouds": "Cloud Coverage Sensor (leer = Auto-Sensor)",
           "sensor_uv": "UV Index Sensor (leer = Auto-Sensor)",
           "pv_history_days": "Cloud-Historien-Tage",
-          "sensor_pv": "PV Panel Energie Sensor"
+          "sensor_pv": "PV Panel Energie Sensoren"
         }
       }
     }
