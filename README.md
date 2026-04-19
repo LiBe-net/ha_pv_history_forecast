@@ -4,21 +4,22 @@
 
 A Home Assistant HACS integration that forecasts the remaining and tomorrow's PV solar yield,
 based on historical yield data from the Home Assistant database.
-<br><br><a href="https://www.buymeacoffee.com/libe.net" rel="nofollow">
-  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" style="height: 60px !important; width: 217px !important; max-width: 100%;">
-</a><br>
 
 
-**Documentation:** [www.libe.net/pv-forecast](https://www.libe.net/pv-forecast)
-
+**full Documentation:** [www.libe.net/pv-forecast](https://www.libe.net/pv-forecast)
 
 ## Installation
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=LiBe-net&repository=ha_pv_history_forecast&category=integration)
 
+or:
 1. Open **HACS** → **⋮ → Add custom repository**
 2. URL: LiBe-net/ha_pv_history_forecast — Category: **Integration**
 3. Install **PV History Forecast** and restart Home Assistant
 4. **Settings → Devices & Services** → Add **PV History Forecast**
 
+<br><a href="https://www.buymeacoffee.com/libe.net" rel="nofollow">
+  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" style="height: 60px !important; width: 217px !important; max-width: 100%;">
+</a><br>
 ## Lovelace Card
 Want to see what's going on? Simply add a Markdown card to get an overview of how the data is generated:
 ```yaml
@@ -30,6 +31,7 @@ content: >-
   {{ state_attr('sensor.pv_hist_remaining_today', 'lovelace_card_remaining_today') }}
 ```
 
+
 ```yaml
 type: markdown
 content: >-
@@ -39,7 +41,14 @@ content: >-
   {{ state_attr('sensor.pv_hist_remaining_today', 'lovelace_card_tomorrow') }}
 ```
 If you are not using the default prefix, you will need to adjust the names.
+
+<table><tr>
+<td><img src="screenshots/markdown-remaining-today.png" alt="Remaining Today"></td>
+<td><img src="screenshots/markdown-tomorrow.png" alt="Tomorrow"></td>
+</tr></table>
+
+
+
 ## License
 
 MIT — see [LICENSE](LICENSE)
-
