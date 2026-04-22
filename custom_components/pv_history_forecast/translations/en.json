@@ -56,7 +56,8 @@
           "sensor_clouds": "Cloud Coverage Sensor (leave empty = auto-sensor)",
           "sensor_uv": "UV Index Sensor (leave empty = auto-sensor)",
           "pv_history_days": "Cloud history days",
-          "sensor_pv": "PV Panel Energy Sensors"
+          "sensor_pv": "PV Panel Energy Sensors",
+          "pv_max_record": "Max. daily PV yield (kWh) — 0 = no limit"
         }
       }
     }

@@ -1,4 +1,4 @@
-"""Constants for the HA SQL PV Forecast integration."""
+﻿"""Constants for the HA SQL PV Forecast integration."""
 from __future__ import annotations
 
 DOMAIN = "pv_history_forecast"
@@ -545,7 +545,7 @@ DEFAULT_VALUE_TEMPLATE_METHOD_TOMORROW = """{#- Return the decision method used 
 
 DEFAULT_UNIT_OF_MEASUREMENT = "kWh"
 DEFAULT_DEVICE_CLASS = "energy"
-DEFAULT_STATE_CLASS = "total_increasing"
+DEFAULT_STATE_CLASS = "measurement"
 DEFAULT_PV_HISTORY_DAYS = 30
 DEFAULT_PV_MAX_RECORD = 0.0
 

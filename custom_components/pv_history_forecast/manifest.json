@@ -8,5 +8,5 @@
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/LiBe-net/ha_pv_history_forecast/issues",
   "requirements": ["sqlalchemy>=1.4.0"],
-  "version": "0.2.1"
+  "version": "0.2.2"
 }
