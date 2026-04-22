@@ -56,7 +56,7 @@ DEFAULT_VALUE_TEMPLATE = """{# PV FORECAST: Remaining yield today, weighted aver
       {% endif %}
     {% endif %}
 
-    {# --- 3. ASTRONOMICAL BASE DATA (location-specific via latitude from HA config) --- #}
+    {# --- 3. ASTRONOMICAL BASE DATA (location-specific via latitude from HA configuration) --- #}
     {% set doy = now().strftime('%j') | int(default=1) %}
     {% set lat_rad = latitude * pi / 180 %}
     {% set decl = -0.4093 * cos(2 * pi * (doy + 10) / 365) %}
