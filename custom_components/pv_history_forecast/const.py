@@ -1,4 +1,4 @@
-﻿"""Constants for the HA SQL PV Forecast integration."""
+"""Constants for the HA SQL PV Forecast integration."""
 from __future__ import annotations
 
 DOMAIN = "pv_history_forecast"
