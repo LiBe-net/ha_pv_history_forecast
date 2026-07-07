@@ -10,24 +10,22 @@
       },
       "reconfigure": {
         "title": "Reconfigure PV History Forecast",
-        "description": "Update the sensors for the existing entry.\n\nIf **no** cloud sensor is selected, the auto-sensor is kept automatically.\n\n{weather_history_warning}",
+        "description": "Update weather entity, PV sensors, and settings. Cloud coverage, UV, and temperature are mirrored automatically via integration sensors from the weather entity.",
         "data": {
           "weather_entity": "Weather Entity (Required) - e.g. weather.forecast_home",
-          "sensor_clouds": "Cloud Coverage Sensor (Optional — leave empty: auto-sensor is kept, works from day 1)",
-          "sensor_uv": "UV Index Sensor (Optional — leave empty: auto-sensor is kept)",
-          "pv_history_days": "Days of cloud history (default: 30)",
-          "sensor_pv": "PV Panel Energy Sensors (select one or more) — e.g. sensor.pv_east_energy, sensor.pv_west_energy"
+          "pv_history_days": "Days of history for matching (default: 30)",
+          "sensor_pv": "PV Panel Energy Sensors (select one or more) — e.g. sensor.pv_east_energy, sensor.pv_west_energy",
+          "retune": "Enable retune (periodically validates historical data and self-optimizes the forecast)"
         }
       },
       "sensors": {
         "title": "Configure Sensors",
-        "description": "Select sensors from the dropdown lists.\n\nIf **no** cloud coverage sensor is selected, the integration automatically creates a cloud coverage sensor. This sensor collects cloud data from the weather entity and works **from day 1**. LTS history (>10 days) builds up automatically.\n\n{weather_history_warning}",
+        "description": "Select the sensors for the PV forecast.\n\nThe integration automatically creates helper sensors (cloud, UV, temperature) and collects data from the weather entity. Long-term history builds up over time; initially, live weather data is used for the forecast.",
         "data": {
           "weather_entity": "Weather Entity (Required) - e.g. weather.forecast_home",
-          "sensor_clouds": "Cloud Coverage Sensor (Optional — leave empty: auto-sensor is created automatically, works from day 1)",
-          "sensor_uv": "UV Index Sensor (Optional — leave empty: auto-sensor is created automatically)",
-          "pv_history_days": "Days of cloud history to use (only applies when a cloud coverage sensor is selected above; default: 30)",
-          "sensor_pv": "PV Panel Energy Sensors (select one or more) — e.g. sensor.pv_east_energy, sensor.pv_west_energy"
+          "pv_history_days": "Days of history for matching (default: 30)",
+          "sensor_pv": "PV Panel Energy Sensors (select one or more) — e.g. sensor.pv_east_energy, sensor.pv_west_energy",
+          "retune": "Enable retune (periodically validates historical data and self-optimizes the forecast)"
         }
       }
     },
@@ -50,14 +48,13 @@
     "step": {
       "init": {
         "title": "PV History Forecast Options",
-        "description": "Update sensors and settings\n\n{weather_history_warning}",
+        "description": "Update weather entity, PV sensors, and settings. Cloud coverage, UV, and temperature are mirrored automatically via integration sensors.",
         "data": {
           "weather_entity": "Weather Entity (e.g. weather.forecast_home)",
-          "sensor_clouds": "Cloud Coverage Sensor (leave empty = auto-sensor)",
-          "sensor_uv": "UV Index Sensor (leave empty = auto-sensor)",
-          "pv_history_days": "Cloud history days",
+          "pv_history_days": "Days of history for matching",
           "sensor_pv": "PV Panel Energy Sensors",
-          "pv_max_record": "Max. daily PV yield (kWh) — 0 = no limit"
+          "pv_max_record": "Max. daily PV yield (kWh) — 0 = no limit",
+          "retune": "Enable retune (periodically validates historical data and self-optimizes the forecast)"
         }
       }
     }

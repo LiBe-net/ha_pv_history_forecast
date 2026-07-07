@@ -34,9 +34,33 @@ class WeatherCoordinator(DataUpdateCoordinator):
         self.forecast_sensor_name = forecast_sensor_name
         self.forecast_entity = f"sensor.{forecast_sensor_name}"
 
+    def _empty_forecast_payload(self) -> dict[str, Any]:
+        """Return a normalized empty forecast payload."""
+        return {
+            "forecast": [],
+            "timestamp": datetime.now().isoformat(),
+        }
+
+    def _last_or_empty_forecast_payload(self) -> dict[str, Any]:
+        """Return last successful forecast payload or an empty payload.
+
+        This avoids clobbering valid forecast data with temporary empty responses
+        during startup/provider hiccups.
+        """
+        if isinstance(self.data, dict) and self.data.get("forecast"):
+            return {
+                "forecast": list(self.data.get("forecast", [])),
+                "timestamp": self.data.get("timestamp", datetime.now().isoformat()),
+            }
+        return self._empty_forecast_payload()
+
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch weather forecast data."""
         try:
+            # Do not hard-skip on unknown/unavailable state: some providers can
+            # still return forecasts via service even while state is transient.
+            # Skipping here can lock downstream SQL into fallback values.
+
             # Call the weather.get_forecasts service
             response = await self.hass.services.async_call(
                 "weather",
@@ -51,7 +75,7 @@ class WeatherCoordinator(DataUpdateCoordinator):
 
             if not response:
                 _LOGGER.warning("No forecast response from %s", self.weather_entity)
-                return {"forecast": []}
+                return self._last_or_empty_forecast_payload()
 
             # Extract forecast data for the weather entity
             # Response format: {entity_id: {"forecast": [...]}}
@@ -70,13 +94,22 @@ class WeatherCoordinator(DataUpdateCoordinator):
             }
 
         except Exception as err:
+            # Another startup race seen in HA logs:
+            # "Service call requested response data but did not match any entities"
+            # Treat this as transient instead of failing the coordinator update.
+            if "did not match any entities" in str(err).lower():
+                _LOGGER.debug(
+                    "Weather entity %s did not match any entities yet; retry on next cycle",
+                    self.weather_entity,
+                )
+                return self._last_or_empty_forecast_payload()
             _LOGGER.error("Error fetching weather forecast: %s", err)
             raise UpdateFailed(f"Error fetching weather forecast: {err}") from err
 
     async def _ensure_forecast_sensor(self) -> bool:
         """
         Ensure the forecast sensor entity exists (or inform user to create it).
-        
+
         This checks if sensor.weather_forecast_hourly exists and creates
         an input_text helper if it doesn't.
         """

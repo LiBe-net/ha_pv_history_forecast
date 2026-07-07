@@ -8,16 +8,23 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.selector import EntitySelector, EntitySelectorConfig
+from homeassistant.helpers.selector import (
+    EntitySelector,
+    EntitySelectorConfig,
+)
 
+from . import const as _const
 from .const import (
     CONF_DB_URL,
+    CONF_SENSOR_PRECIP,
     CONF_SENSOR_PREFIX,
     CONF_PV_HISTORY_DAYS,
     CONF_SENSOR_CLOUDS,
     CONF_SENSOR_FORECAST,
     CONF_SENSOR_PV,
     CONF_SENSOR_UV,
+    CONF_SENSOR_TEMP,
+    CONF_SENSOR_PRECIP,
     CONF_WEATHER_ENTITY,
     CONF_VALUE_TEMPLATE,
     CONF_UNIT_OF_MEASUREMENT,
@@ -34,64 +41,70 @@ from .const import (
     DOMAIN,
 )
 
+CONF_RETUNE = _const.CONF_RETUNE
+DEFAULT_RETUNE = bool(_const.DEFAULT_RETUNE)
+
 _LOGGER = logging.getLogger(__name__)
 
-MIN_HISTORY_DAYS = 10
+
+def _auto_sensor_ids(prefix: str) -> dict[str, str]:
+    """Return integration-managed cloud, UV, and temperature sensor entity IDs."""
+    return {
+        CONF_SENSOR_CLOUDS: f"sensor.{prefix}_cloud_coverage",
+        CONF_SENSOR_UV: f"sensor.{prefix}_uv",
+        CONF_SENSOR_TEMP: f"sensor.{prefix}_temperature",
+        CONF_SENSOR_PRECIP: f"sensor.{prefix}_precipitation",
+    }
 
 
-def _count_entity_history_days(db_url: str, entity_id: str) -> int:
-    """Count distinct days with non-empty states for entity_id in the last 30 days.
+def _apply_auto_sensors(target: dict[str, Any], prefix: str) -> None:
+    """Always use integration auto-sensors for cloud, UV, and temperature."""
+    target.update(_auto_sensor_ids(prefix))
 
-    Runs in an executor (blocking SQLAlchemy call).
-    Returns 0 on any error so the caller can decide whether to warn.
+
+def _build_sql_query(
+    *,
+    prefix: str,
+    sensor_pv_list: list[str],
+    sensor_forecast: str,
+    history_days: int,
+    weather_entity: str,
+) -> str:
+    """Format DEFAULT_SQL_QUERY with auto-managed auxiliary sensors."""
+    auto = _auto_sensor_ids(prefix)
+    sensor_pv_sql_list = ", ".join(f"'{s}'" for s in sensor_pv_list)
+    sensor_pv_first = sensor_pv_list[0] if sensor_pv_list else ""
+    return DEFAULT_SQL_QUERY.format(
+        sensor_clouds=auto[CONF_SENSOR_CLOUDS],
+        sensor_pv_list=sensor_pv_sql_list,
+        sensor_pv_first=sensor_pv_first,
+        sensor_forecast=sensor_forecast,
+        sensor_uv=auto[CONF_SENSOR_UV],
+        sensor_temp=auto[CONF_SENSOR_TEMP],
+        sensor_precip=auto[CONF_SENSOR_PRECIP],
+        history_days=history_days,
+        weather_entity=weather_entity,
+    )
+
+
+def _resolve_retune_enabled(
+    options: dict[str, Any] | None,
+    data: dict[str, Any] | None,
+    *,
+    default_if_missing: bool,
+) -> bool:
+    """Resolve retune flag with explicit legacy fallback behavior.
+
+    Existing entries created before the retune option existed should stay
+    non-retuned unless the user explicitly enables it.
     """
-    try:
-        from sqlalchemy import create_engine, text as sa_text  # noqa: PLC0415
-        engine = create_engine(db_url, echo=False)
-        with engine.connect() as conn:
-            row = conn.execute(
-                sa_text(
-                    "SELECT COUNT(DISTINCT date(s.last_updated_ts, 'unixepoch')) "
-                    "FROM states s "
-                    "JOIN states_meta m ON s.metadata_id = m.metadata_id "
-                    "WHERE m.entity_id = :eid "
-                    "AND s.last_updated_ts > strftime('%s', 'now', '-30 days') "
-                    "AND s.state NOT IN ('unknown', 'unavailable', '')"
-                ),
-                {"eid": entity_id},
-            ).fetchone()
-            return int(row[0]) if row and row[0] is not None else 0
-    except Exception:  # noqa: BLE001
-        return 0
-
-
-# ---------------------------------------------------------------------------
-# Warning helpers
-# ---------------------------------------------------------------------------
-
-_WARNINGS: dict[str, dict[str, str]] = {
-    "low_history": {
-        "de": (
-            "⚠️ **{entity}** hat nur **{days} Tag(e)** Cloud-Verlauf "
-            "(empfohlen: ≥{min_days}). "
-            "Prognosen sind bis zum Aufbau eines ausreichenden Verlaufs ungenau. "
-            "Zum Bestätigen erneut absenden."
-        ),
-        "en": (
-            "⚠️ **{entity}** has only **{days} day(s)** of cloud history "
-            "(recommended: ≥{min_days}). "
-            "Forecasts will be inaccurate until sufficient cloud history is built up. "
-            "Submit again to confirm."
-        ),
-    },
-}
-
-
-def _format_warning(hass, key: str, **kwargs: object) -> str:
-    """Return a language-aware warning message for *key*."""
-    lang = getattr(hass.config, "language", "en")[:2].lower()
-    tmpl = _WARNINGS.get(key, {}).get(lang) or _WARNINGS.get(key, {}).get("en", "")
-    return tmpl.format(**kwargs)
+    opts = options or {}
+    entry_data = data or {}
+    if CONF_RETUNE in opts:
+        return bool(opts.get(CONF_RETUNE))
+    if CONF_RETUNE in entry_data:
+        return bool(entry_data.get(CONF_RETUNE))
+    return bool(default_if_missing)
 
 
 async def _check_weather_supports_forecasts(hass, weather_entity: str) -> bool:
@@ -124,29 +137,6 @@ async def _check_weather_has_cloud_forecast(hass, weather_entity: str) -> bool:
         return any(f.get("cloud_coverage") is not None for f in forecasts)
     except Exception:  # noqa: BLE001
         return True  # don't block setup on unexpected errors
-
-
-def _get_percent_sensor_ids(hass) -> list[str]:
-    """Return sensor entity_ids whose unit_of_measurement is '%' and that have a current value."""
-    return [
-        s.entity_id
-        for s in hass.states.async_all("sensor")
-        if s.attributes.get("unit_of_measurement") == "%"
-        and s.state not in ("unknown", "unavailable", "")
-    ]
-
-
-def _get_uv_sensor_ids(hass) -> list[str]:
-    """Return sensor entity_ids that look like UV index sensors."""
-    uv_units = {"UV index", "UVI", "uv"}
-    result = []
-    for s in hass.states.async_all("sensor"):
-        unit = (s.attributes.get("unit_of_measurement") or "").lower()
-        name = s.entity_id.lower()
-        if unit in {u.lower() for u in uv_units} or "uv" in name:
-            if s.state not in ("unknown", "unavailable", ""):
-                result.append(s.entity_id)
-    return result
 
 
 def _get_energy_sensor_ids(hass) -> list[str]:
@@ -218,20 +208,15 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors = {}
 
         if user_input is not None:
-            # Validiere die eingegebenen Entity IDs
             weather_entity = user_input.get(CONF_WEATHER_ENTITY, "").strip()
             sensor_pv_raw = user_input.get(CONF_SENSOR_PV) or []
             sensor_pv_list = [sensor_pv_raw] if isinstance(sensor_pv_raw, str) and sensor_pv_raw else (sensor_pv_raw if isinstance(sensor_pv_raw, list) else [])
-            sensor_clouds = (user_input.get(CONF_SENSOR_CLOUDS) or "").strip()
-            sensor_uv = (user_input.get(CONF_SENSOR_UV) or "").strip()
 
-            # Validiere Weather Entity
             if not weather_entity:
                 errors["base"] = "weather_entity_required"
             elif not weather_entity.startswith("weather."):
                 errors[CONF_WEATHER_ENTITY] = "must_be_weather_entity"
 
-            # Validiere PV Sensoren (mind. 1, alle müssen sensor.* sein)
             if not sensor_pv_list:
                 errors["base"] = "sensor_pv_required"
             else:
@@ -240,15 +225,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         errors[CONF_SENSOR_PV] = "must_be_sensor_entity"
                         break
 
-            # Validiere Cloud Sensor wenn angegeben
-            if sensor_clouds and not sensor_clouds.startswith("sensor."):
-                errors[CONF_SENSOR_CLOUDS] = "must_be_sensor_entity"
-
-            # Validiere UV Sensor wenn angegeben
-            if sensor_uv and not sensor_uv.startswith("sensor."):
-                errors[CONF_SENSOR_UV] = "must_be_sensor_entity"
-
-            # Validiere PV Sensor Einheiten (kWh oder Wh für jeden Sensor)
             if not errors.get(CONF_SENSOR_PV) and sensor_pv_list:
                 for _pv in sensor_pv_list:
                     pv_state = self.hass.states.get(_pv)
@@ -263,107 +239,55 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     step_id="sensors",
                     data_schema=self._get_sensors_schema(defaults=user_input),
                     errors=errors,
-                    description_placeholders={"weather_history_warning": ""},
                 )
 
-            # ---- get_forecasts support check: blocking ----
             supports_forecasts = await _check_weather_supports_forecasts(self.hass, weather_entity)
             if not supports_forecasts:
                 return self.async_show_form(
                     step_id="sensors",
                     data_schema=self._get_sensors_schema(defaults=user_input),
                     errors={"base": "no_forecast_support"},
-                    description_placeholders={"weather_history_warning": ""},
                 )
 
-            # ---- Cloud-coverage check: blocking — cannot function without it ----
-            has_cloud = (
-                await _check_weather_has_cloud_forecast(self.hass, weather_entity)
-                if not sensor_clouds
-                else True
-            )
+            has_cloud = await _check_weather_has_cloud_forecast(self.hass, weather_entity)
             if not has_cloud:
                 return self.async_show_form(
                     step_id="sensors",
                     data_schema=self._get_sensors_schema(defaults=user_input),
                     errors={"base": "no_cloud_forecast"},
-                    description_placeholders={"weather_history_warning": ""},
                 )
 
-            # ---- History warning (non-blocking) ----
-            db_url = self.data_cache.get(CONF_DB_URL) or "sqlite:////config/home-assistant_v2.db"
-            check_entity = sensor_clouds if sensor_clouds else weather_entity
-            days = await self.hass.async_add_executor_job(
-                _count_entity_history_days, db_url, check_entity
-            )
-
-            warn_parts: list[str] = []
-            if days < MIN_HISTORY_DAYS:
-                warn_parts.append(
-                    _format_warning(
-                        self.hass, "low_history",
-                        entity=check_entity, days=days, min_days=MIN_HISTORY_DAYS,
-                    )
-                )
-
-            if warn_parts and not getattr(self, "_history_warning_confirmed", False):
-                self._history_warning_confirmed = True
-                return self.async_show_form(
-                    step_id="sensors",
-                    data_schema=self._get_sensors_schema(defaults=user_input),
-                    errors={},
-                    description_placeholders={"weather_history_warning": "\n\n".join(warn_parts)},
-                )
-            self._history_warning_confirmed = False
-            # -----------------------------------------------------------
-
-            # Merge mit den vorherigen Daten
             data = {**self.data_cache, **user_input}
-            
-            # Sensor-Namen aus Präfix ableiten
             prefix = data[CONF_SENSOR_PREFIX]
             data[CONF_SENSOR_FORECAST] = f"sensor.{prefix}_weather_forecast"
+            _apply_auto_sensors(data, prefix)
 
-            # Wenn kein externer Cloud-Sensor gewählt: Auto-Sensor anlegen.
-            if not data.get(CONF_SENSOR_CLOUDS):
-                clouds_sensor = f"sensor.{prefix}_cloud_coverage"
-                data[CONF_SENSOR_CLOUDS] = clouds_sensor
-            else:
-                clouds_sensor = data[CONF_SENSOR_CLOUDS]
-
-            # Wenn kein UV-Sensor gewählt: Auto-Sensor anlegen.
-            if not data.get(CONF_SENSOR_UV):
-                uv_sensor = f"sensor.{prefix}_uv"
-                data[CONF_SENSOR_UV] = uv_sensor
-            else:
-                uv_sensor = data[CONF_SENSOR_UV]
-
-            # Erstelle die SQL Query mit den Sensoren
             history_days = data.get(CONF_PV_HISTORY_DAYS, 30)
             _pv_entries = data[CONF_SENSOR_PV]
             if isinstance(_pv_entries, str):
                 _pv_entries = [_pv_entries] if _pv_entries else []
-            sensor_pv_sql_list = ", ".join(f"'{s}'" for s in _pv_entries)
-            sensor_pv_first = _pv_entries[0] if _pv_entries else ""
-            sql_query = DEFAULT_SQL_QUERY.format(
-                sensor_clouds=clouds_sensor,
-                sensor_pv_list=sensor_pv_sql_list,
-                sensor_pv_first=sensor_pv_first,
+            data[CONF_SENSOR_PV] = _pv_entries
+            data["sql_query"] = _build_sql_query(
+                prefix=prefix,
+                sensor_pv_list=_pv_entries,
                 sensor_forecast=data[CONF_SENSOR_FORECAST],
-                sensor_uv=uv_sensor,
                 history_days=history_days,
-                weather_entity=data[CONF_WEATHER_ENTITY],
+                weather_entity=weather_entity,
             )
-            
-            data["sql_query"] = sql_query
             data[CONF_VALUE_TEMPLATE] = DEFAULT_VALUE_TEMPLATE
             data[CONF_UNIT_OF_MEASUREMENT] = DEFAULT_UNIT_OF_MEASUREMENT
             data[CONF_DEVICE_CLASS] = DEFAULT_DEVICE_CLASS
-            data[CONF_STATE_CLASS] = DEFAULT_STATE_CLASS
-            
+            data[CONF_STATE_CLASS] = (
+                None
+                if str(DEFAULT_DEVICE_CLASS).lower() == "energy"
+                and str(DEFAULT_STATE_CLASS).lower() == "measurement"
+                else DEFAULT_STATE_CLASS
+            )
+            data[CONF_RETUNE] = bool(data.get(CONF_RETUNE, DEFAULT_RETUNE))
+
             await self.async_set_unique_id(prefix)
             self._abort_if_unique_id_configured()
-            
+
             return self.async_create_entry(
                 title=prefix, data=data
             )
@@ -372,43 +296,16 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="sensors",
             data_schema=self._get_sensors_schema(),
             errors=errors,
-            description_placeholders={"weather_history_warning": ""},
         )
-    
-    def _get_sensors_schema(self, defaults: dict[str, Any] | None = None) -> vol.Schema:
-        """Get the sensors configuration schema with pre-filtered entity selectors.
 
-        Pass *defaults* (e.g. the current ``user_input``) to keep field values when
-        re-displaying the form after a warning or validation error.
-        """
+    def _get_sensors_schema(self, defaults: dict[str, Any] | None = None) -> vol.Schema:
+        """Get the sensors configuration schema with pre-filtered entity selectors."""
         d = defaults or {}
-        percent_ids = _get_percent_sensor_ids(self.hass)
         energy_ids = _get_energy_sensor_ids(self.hass)
-        uv_ids = _get_uv_sensor_ids(self.hass)
-        cloud_selector = EntitySelector(
-            EntitySelectorConfig(include_entities=percent_ids, multiple=False)
-            if percent_ids
-            else EntitySelectorConfig(domain="sensor", multiple=False)
-        )
         pv_selector = EntitySelector(
             EntitySelectorConfig(include_entities=energy_ids, multiple=True)
             if energy_ids
             else EntitySelectorConfig(domain="sensor", device_class="energy", multiple=True)
-        )
-        uv_selector = EntitySelector(
-            EntitySelectorConfig(include_entities=uv_ids, multiple=False)
-            if uv_ids
-            else EntitySelectorConfig(domain="sensor", multiple=False)
-        )
-        cloud_key = (
-            vol.Optional(CONF_SENSOR_CLOUDS, default=d[CONF_SENSOR_CLOUDS])
-            if d.get(CONF_SENSOR_CLOUDS)
-            else vol.Optional(CONF_SENSOR_CLOUDS)
-        )
-        uv_key = (
-            vol.Optional(CONF_SENSOR_UV, default=d[CONF_SENSOR_UV])
-            if d.get(CONF_SENSOR_UV)
-            else vol.Optional(CONF_SENSOR_UV)
         )
         _pv_default = d.get(CONF_SENSOR_PV, [])
         if isinstance(_pv_default, str):
@@ -424,17 +321,56 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         multiple=False,
                     )
                 ),
-                cloud_key: cloud_selector,
-                uv_key: uv_selector,
-                vol.Optional(
-                    CONF_PV_HISTORY_DAYS,
-                    default=d.get(CONF_PV_HISTORY_DAYS, 30),
-                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
                 vol.Required(
                     CONF_SENSOR_PV,
                     default=_pv_default,
                 ): pv_selector,
-                # CONF_SENSOR_FORECAST wird automatisch gesetzt
+                vol.Optional(
+                    CONF_PV_HISTORY_DAYS,
+                    default=d.get(CONF_PV_HISTORY_DAYS, 30),
+                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
+                vol.Optional(
+                    CONF_RETUNE,
+                    default=d.get(CONF_RETUNE, DEFAULT_RETUNE),
+                ): bool,
+            }
+        )
+
+    def _get_reconfigure_schema(
+        self,
+        *,
+        data: dict[str, Any],
+        defaults: dict[str, Any] | None = None,
+    ) -> vol.Schema:
+        """Schema for reconfigure step (weather + PV only)."""
+        d = defaults or {}
+        energy_ids = _get_energy_sensor_ids(self.hass)
+        pv_selector = EntitySelector(
+            EntitySelectorConfig(include_entities=energy_ids, multiple=True)
+            if energy_ids
+            else EntitySelectorConfig(domain="sensor", device_class="energy", multiple=True)
+        )
+        _pv_default = d.get(CONF_SENSOR_PV, data.get(CONF_SENSOR_PV, []))
+        if isinstance(_pv_default, str):
+            _pv_default = [_pv_default] if _pv_default else []
+        return vol.Schema(
+            {
+                vol.Required(
+                    CONF_WEATHER_ENTITY,
+                    default=d.get(CONF_WEATHER_ENTITY, data.get(CONF_WEATHER_ENTITY, "")),
+                ): EntitySelector(EntitySelectorConfig(domain="weather", multiple=False)),
+                vol.Required(CONF_SENSOR_PV, default=_pv_default): pv_selector,
+                vol.Optional(
+                    CONF_PV_HISTORY_DAYS,
+                    default=d.get(CONF_PV_HISTORY_DAYS, data.get(CONF_PV_HISTORY_DAYS, 30)),
+                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
+                vol.Optional(
+                    CONF_RETUNE,
+                    default=d.get(
+                        CONF_RETUNE,
+                        _resolve_retune_enabled(None, data, default_if_missing=False),
+                    ),
+                ): bool,
             }
         )
 
@@ -446,17 +382,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         data = dict(entry.data)
         errors: dict[str, str] = {}
         prefix = data.get(CONF_SENSOR_PREFIX, DEFAULT_SENSOR_PREFIX)
-        auto_cloud = f"sensor.{prefix}_cloud_coverage"
-        current_cloud = data.get(CONF_SENSOR_CLOUDS, "")
-        # show empty in the field when the auto-sensor is active
-        display_cloud = current_cloud if current_cloud and current_cloud != auto_cloud else None
 
         if user_input is not None:
             weather_entity = (user_input.get(CONF_WEATHER_ENTITY) or "").strip()
             sensor_pv_raw = user_input.get(CONF_SENSOR_PV) or []
             sensor_pv_list = [sensor_pv_raw] if isinstance(sensor_pv_raw, str) and sensor_pv_raw else (sensor_pv_raw if isinstance(sensor_pv_raw, list) else [])
-            sensor_clouds = (user_input.get(CONF_SENSOR_CLOUDS) or "").strip()
-            sensor_uv = (user_input.get(CONF_SENSOR_UV) or "").strip()
 
             if not weather_entity:
                 errors["base"] = "weather_entity_required"
@@ -469,12 +399,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     if not _pv.startswith("sensor."):
                         errors[CONF_SENSOR_PV] = "must_be_sensor_entity"
                         break
-            if sensor_clouds and not sensor_clouds.startswith("sensor."):
-                errors[CONF_SENSOR_CLOUDS] = "must_be_sensor_entity"
-            if sensor_uv and not sensor_uv.startswith("sensor."):
-                errors[CONF_SENSOR_UV] = "must_be_sensor_entity"
 
-            # Validate PV sensor units (kWh or Wh for each sensor)
             if not errors.get(CONF_SENSOR_PV) and sensor_pv_list:
                 for _pv in sensor_pv_list:
                     pv_state = self.hass.states.get(_pv)
@@ -484,185 +409,56 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             errors[CONF_SENSOR_PV] = "sensor_pv_wrong_unit"
                             break
 
-            if not errors:
-                if not sensor_clouds:
-                    sensor_clouds = auto_cloud
-                if not sensor_uv:
-                    sensor_uv = f"sensor.{prefix}_uv"
-                history_days = user_input.get(CONF_PV_HISTORY_DAYS, data.get(CONF_PV_HISTORY_DAYS, 30))
-
-                # ---- get_forecasts support check: blocking ----
-                supports_forecasts = await _check_weather_supports_forecasts(self.hass, weather_entity)
-                if not supports_forecasts:
-                    cloud_val = sensor_clouds if sensor_clouds != auto_cloud else None
-                    uv_val = sensor_uv if sensor_uv != f"sensor.{prefix}_uv" else None
-                    cloud_err_key = (
-                        vol.Optional(CONF_SENSOR_CLOUDS, default=cloud_val)
-                        if cloud_val is not None
-                        else vol.Optional(CONF_SENSOR_CLOUDS)
-                    )
-                    uv_err_key = (
-                        vol.Optional(CONF_SENSOR_UV, default=uv_val)
-                        if uv_val is not None
-                        else vol.Optional(CONF_SENSOR_UV)
-                    )
-                    return self.async_show_form(
-                        step_id="reconfigure",
-                        data_schema=vol.Schema({
-                            vol.Required(CONF_WEATHER_ENTITY, default=weather_entity):
-                                EntitySelector(EntitySelectorConfig(domain="weather", multiple=False)),
-                            cloud_err_key: EntitySelector(EntitySelectorConfig(domain="sensor", multiple=False)),
-                            uv_err_key: EntitySelector(EntitySelectorConfig(domain="sensor", multiple=False)),
-                            vol.Optional(CONF_PV_HISTORY_DAYS, default=history_days):
-                                vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
-                            vol.Required(CONF_SENSOR_PV, default=sensor_pv_list):
-                                EntitySelector(EntitySelectorConfig(domain="sensor", multiple=True)),
-                        }),
-                        errors={"base": "no_forecast_support"},
-                        description_placeholders={"weather_history_warning": ""},
-                    )
-
-                # ---- Cloud-coverage check: blocking ----
-                has_cloud = (
-                    await _check_weather_has_cloud_forecast(self.hass, weather_entity)
-                    if sensor_clouds == auto_cloud
-                    else True
-                )
-                if not has_cloud:
-                    cloud_val = sensor_clouds if sensor_clouds != auto_cloud else None
-                    uv_val = sensor_uv if sensor_uv != f"sensor.{prefix}_uv" else None
-                    cloud_err_key = (
-                        vol.Optional(CONF_SENSOR_CLOUDS, default=cloud_val)
-                        if cloud_val is not None
-                        else vol.Optional(CONF_SENSOR_CLOUDS)
-                    )
-                    uv_err_key = (
-                        vol.Optional(CONF_SENSOR_UV, default=uv_val)
-                        if uv_val is not None
-                        else vol.Optional(CONF_SENSOR_UV)
-                    )
-                    return self.async_show_form(
-                        step_id="reconfigure",
-                        data_schema=vol.Schema({
-                            vol.Required(CONF_WEATHER_ENTITY, default=weather_entity):
-                                EntitySelector(EntitySelectorConfig(domain="weather", multiple=False)),
-                            cloud_err_key: EntitySelector(EntitySelectorConfig(domain="sensor", multiple=False)),
-                            uv_err_key: EntitySelector(EntitySelectorConfig(domain="sensor", multiple=False)),
-                            vol.Optional(CONF_PV_HISTORY_DAYS, default=history_days):
-                                vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
-                            vol.Required(CONF_SENSOR_PV, default=sensor_pv_list):
-                                EntitySelector(EntitySelectorConfig(domain="sensor", multiple=True)),
-                        }),
-                        errors={"base": "no_cloud_forecast"},
-                        description_placeholders={"weather_history_warning": ""},
-                    )
-
-                # ---- History warning (non-blocking) ----
-                db_url = data.get(CONF_DB_URL) or "sqlite:////config/home-assistant_v2.db"
-                check_entity = sensor_clouds if sensor_clouds != auto_cloud else weather_entity
-                days = await self.hass.async_add_executor_job(
-                    _count_entity_history_days, db_url, check_entity
+            if errors:
+                return self.async_show_form(
+                    step_id="reconfigure",
+                    data_schema=self._get_reconfigure_schema(data=data, defaults=user_input),
+                    errors=errors,
                 )
 
-                warn_parts: list[str] = []
-                if days < MIN_HISTORY_DAYS:
-                    warn_parts.append(
-                        _format_warning(
-                            self.hass, "low_history",
-                            entity=check_entity, days=days, min_days=MIN_HISTORY_DAYS,
-                        )
-                    )
+            history_days = user_input.get(CONF_PV_HISTORY_DAYS, data.get(CONF_PV_HISTORY_DAYS, 30))
+            supports_forecasts = await _check_weather_supports_forecasts(self.hass, weather_entity)
+            if not supports_forecasts:
+                return self.async_show_form(
+                    step_id="reconfigure",
+                    data_schema=self._get_reconfigure_schema(data=data, defaults=user_input),
+                    errors={"base": "no_forecast_support"},
+                )
 
-                if warn_parts and not getattr(self, "_reconf_history_warning_confirmed", False):
-                    self._reconf_history_warning_confirmed = True
-                    # Build inline schema preserving the user's selections
-                    cloud_val = sensor_clouds if sensor_clouds != auto_cloud else None
-                    uv_val = sensor_uv if sensor_uv != f"sensor.{prefix}_uv" else None
-                    cloud_warn_key = (
-                        vol.Optional(CONF_SENSOR_CLOUDS, default=cloud_val)
-                        if cloud_val is not None
-                        else vol.Optional(CONF_SENSOR_CLOUDS)
-                    )
-                    uv_warn_key = (
-                        vol.Optional(CONF_SENSOR_UV, default=uv_val)
-                        if uv_val is not None
-                        else vol.Optional(CONF_SENSOR_UV)
-                    )
-                    return self.async_show_form(
-                        step_id="reconfigure",
-                        data_schema=vol.Schema({
-                            vol.Required(CONF_WEATHER_ENTITY, default=weather_entity):
-                                EntitySelector(EntitySelectorConfig(domain="weather", multiple=False)),
-                            cloud_warn_key: EntitySelector(EntitySelectorConfig(domain="sensor", multiple=False)),
-                            uv_warn_key: EntitySelector(EntitySelectorConfig(domain="sensor", multiple=False)),
-                            vol.Optional(CONF_PV_HISTORY_DAYS, default=history_days):
-                                vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
-                            vol.Required(CONF_SENSOR_PV, default=sensor_pv_list):
-                                EntitySelector(EntitySelectorConfig(domain="sensor", multiple=True)),
-                        }),
-                        errors={},
-                        description_placeholders={"weather_history_warning": "\n\n".join(warn_parts)},
-                    )
-                self._reconf_history_warning_confirmed = False
-                # -----------------------------------------------------------
+            has_cloud = await _check_weather_has_cloud_forecast(self.hass, weather_entity)
+            if not has_cloud:
+                return self.async_show_form(
+                    step_id="reconfigure",
+                    data_schema=self._get_reconfigure_schema(data=data, defaults=user_input),
+                    errors={"base": "no_cloud_forecast"},
+                )
 
-                data.update({
-                    CONF_WEATHER_ENTITY: weather_entity,
-                    CONF_SENSOR_PV: sensor_pv_list,
-                    CONF_SENSOR_CLOUDS: sensor_clouds,
-                    CONF_SENSOR_UV: sensor_uv,
-                    CONF_PV_HISTORY_DAYS: history_days,
-                })
-                return self.async_update_reload_and_abort(entry, data=data)
+            data.update({
+                CONF_WEATHER_ENTITY: weather_entity,
+                CONF_SENSOR_PV: sensor_pv_list,
+                CONF_PV_HISTORY_DAYS: history_days,
+                CONF_RETUNE: bool(
+                    user_input.get(
+                        CONF_RETUNE,
+                        _resolve_retune_enabled(None, data, default_if_missing=False),
+                    )
+                ),
+            })
+            _apply_auto_sensors(data, prefix)
+            data.pop("retune_mode", None)
+            data["sql_query"] = _build_sql_query(
+                prefix=prefix,
+                sensor_pv_list=sensor_pv_list,
+                sensor_forecast=data.get(CONF_SENSOR_FORECAST, f"sensor.{prefix}_weather_forecast"),
+                history_days=history_days,
+                weather_entity=weather_entity,
+            )
+            return self.async_update_reload_and_abort(entry, data=data)
 
-        percent_ids = _get_percent_sensor_ids(self.hass)
-        energy_ids = _get_energy_sensor_ids(self.hass)
-        uv_ids = _get_uv_sensor_ids(self.hass)
-        cloud_selector = EntitySelector(
-            EntitySelectorConfig(include_entities=percent_ids, multiple=False)
-            if percent_ids
-            else EntitySelectorConfig(domain="sensor", multiple=False)
-        )
-        pv_selector = EntitySelector(
-            EntitySelectorConfig(include_entities=energy_ids, multiple=True)
-            if energy_ids
-            else EntitySelectorConfig(domain="sensor", device_class="energy", multiple=True)
-        )
-        uv_selector = EntitySelector(
-            EntitySelectorConfig(include_entities=uv_ids, multiple=False)
-            if uv_ids
-            else EntitySelectorConfig(domain="sensor", multiple=False)
-        )
-        auto_uv = f"sensor.{prefix}_uv"
-        current_uv = data.get(CONF_SENSOR_UV, "")
-        display_uv = current_uv if current_uv and current_uv != auto_uv else None
-        cloud_field_key = (
-            vol.Optional(CONF_SENSOR_CLOUDS, default=display_cloud)
-            if display_cloud is not None
-            else vol.Optional(CONF_SENSOR_CLOUDS)
-        )
-        uv_field_key = (
-            vol.Optional(CONF_SENSOR_UV, default=display_uv)
-            if display_uv is not None
-            else vol.Optional(CONF_SENSOR_UV)
-        )
-        _pv_default = data.get(CONF_SENSOR_PV, [])
-        if isinstance(_pv_default, str):
-            _pv_default = [_pv_default] if _pv_default else []
         return self.async_show_form(
             step_id="reconfigure",
-            data_schema=vol.Schema({
-                vol.Required(CONF_WEATHER_ENTITY, default=data.get(CONF_WEATHER_ENTITY, "")):
-                    EntitySelector(EntitySelectorConfig(domain="weather", multiple=False)),
-                cloud_field_key: cloud_selector,
-                uv_field_key: uv_selector,
-                vol.Optional(CONF_PV_HISTORY_DAYS, default=data.get(CONF_PV_HISTORY_DAYS, 30)):
-                    vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
-                vol.Required(CONF_SENSOR_PV, default=_pv_default):
-                    pv_selector,
-            }),
+            data_schema=self._get_reconfigure_schema(data=data),
             errors=errors,
-            description_placeholders={"weather_history_warning": ""},
         )
 
 
@@ -675,23 +471,13 @@ class OptionsFlow(config_entries.OptionsFlow):
     ) -> FlowResult:
         """Manage the options."""
         errors: dict[str, str] = {}
+        options = self.config_entry.options or {}
 
         if user_input is not None:
             prefix = self.config_entry.data.get(CONF_SENSOR_PREFIX, DEFAULT_SENSOR_PREFIX)
             data = self.config_entry.data
 
-            # Resolve weather entity (new value wins over stored data)
             weather_entity = (user_input.get(CONF_WEATHER_ENTITY) or "").strip() or data.get(CONF_WEATHER_ENTITY, "")
-
-            # Resolve cloud sensor — empty means keep/create the auto-sensor
-            sensor_clouds = (user_input.get(CONF_SENSOR_CLOUDS) or "").strip()
-            if not sensor_clouds:
-                sensor_clouds = f"sensor.{prefix}_cloud_coverage"
-
-            # Resolve UV sensor — empty means keep/create the auto-sensor
-            sensor_uv = (user_input.get(CONF_SENSOR_UV) or "").strip()
-            if not sensor_uv:
-                sensor_uv = f"sensor.{prefix}_uv"
 
             sensor_pv_raw = user_input.get(CONF_SENSOR_PV) or data.get(CONF_SENSOR_PV) or []
             sensor_pv_list = [sensor_pv_raw] if isinstance(sensor_pv_raw, str) and sensor_pv_raw else (sensor_pv_raw if isinstance(sensor_pv_raw, list) else [])
@@ -716,199 +502,96 @@ class OptionsFlow(config_entries.OptionsFlow):
                 sensor_forecast = data.get(CONF_SENSOR_FORECAST, f"sensor.{prefix}_weather_forecast")
                 history_days = user_input.get(CONF_PV_HISTORY_DAYS, data.get(CONF_PV_HISTORY_DAYS, 30))
 
-                # ---- get_forecasts support check: blocking ----
-                auto_cloud = f"sensor.{prefix}_cloud_coverage"
                 supports_forecasts = await _check_weather_supports_forecasts(self.hass, weather_entity)
                 if not supports_forecasts:
-                    pids = _get_percent_sensor_ids(self.hass)
-                    eids = _get_energy_sensor_ids(self.hass)
-                    uids = _get_uv_sensor_ids(self.hass)
                     return self.async_show_form(
                         step_id="init",
-                        data_schema=vol.Schema({
-                            vol.Required(CONF_WEATHER_ENTITY, default=weather_entity):
-                                EntitySelector(EntitySelectorConfig(domain="weather", multiple=False)),
-                            vol.Optional(CONF_SENSOR_CLOUDS):
-                                EntitySelector(EntitySelectorConfig(include_entities=pids, multiple=False) if pids else EntitySelectorConfig(domain="sensor", multiple=False)),
-                            vol.Optional(CONF_SENSOR_UV):
-                                EntitySelector(EntitySelectorConfig(include_entities=uids, multiple=False) if uids else EntitySelectorConfig(domain="sensor", multiple=False)),
-                            vol.Optional(CONF_PV_HISTORY_DAYS, default=history_days):
-                                vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
-                            vol.Required(CONF_SENSOR_PV, default=sensor_pv_list):
-                                EntitySelector(EntitySelectorConfig(include_entities=eids, multiple=True) if eids else EntitySelectorConfig(domain="sensor", multiple=True)),
-                        }),
+                        data_schema=self._get_options_schema(data, options, defaults=user_input),
                         errors={"base": "no_forecast_support"},
-                        description_placeholders={"weather_history_warning": ""},
                     )
 
-                # ---- Cloud-coverage check: blocking ----
-                has_cloud = (
-                    await _check_weather_has_cloud_forecast(self.hass, weather_entity)
-                    if sensor_clouds == auto_cloud
-                    else True
-                )
+                has_cloud = await _check_weather_has_cloud_forecast(self.hass, weather_entity)
                 if not has_cloud:
-                    pids = _get_percent_sensor_ids(self.hass)
-                    eids = _get_energy_sensor_ids(self.hass)
-                    uids = _get_uv_sensor_ids(self.hass)
-                    cloud_err_val = sensor_clouds if sensor_clouds != auto_cloud else None
-                    uv_err_val = sensor_uv if sensor_uv != f"sensor.{prefix}_uv" else None
-                    cloud_err_key = (
-                        vol.Optional(CONF_SENSOR_CLOUDS, default=cloud_err_val)
-                        if cloud_err_val is not None
-                        else vol.Optional(CONF_SENSOR_CLOUDS)
-                    )
-                    uv_err_key = (
-                        vol.Optional(CONF_SENSOR_UV, default=uv_err_val)
-                        if uv_err_val is not None
-                        else vol.Optional(CONF_SENSOR_UV)
-                    )
-                    err_schema = vol.Schema({
-                        vol.Required(CONF_WEATHER_ENTITY, default=weather_entity):
-                            EntitySelector(EntitySelectorConfig(domain="weather", multiple=False)),
-                        cloud_err_key:
-                            EntitySelector(EntitySelectorConfig(include_entities=pids, multiple=False) if pids else EntitySelectorConfig(domain="sensor", multiple=False)),
-                        uv_err_key:
-                            EntitySelector(EntitySelectorConfig(include_entities=uids, multiple=False) if uids else EntitySelectorConfig(domain="sensor", multiple=False)),
-                        vol.Optional(CONF_PV_HISTORY_DAYS, default=history_days):
-                            vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
-                        vol.Required(CONF_SENSOR_PV, default=sensor_pv_list):
-                            EntitySelector(EntitySelectorConfig(include_entities=eids, multiple=True) if eids else EntitySelectorConfig(domain="sensor", multiple=True)),
-                    })
                     return self.async_show_form(
                         step_id="init",
-                        data_schema=err_schema,
+                        data_schema=self._get_options_schema(data, options, defaults=user_input),
                         errors={"base": "no_cloud_forecast"},
-                        description_placeholders={"weather_history_warning": ""},
                     )
 
-                # ---- History warning (non-blocking) ----
-                db_url = data.get(CONF_DB_URL) or "sqlite:////config/home-assistant_v2.db"
-                check_entity = sensor_clouds if sensor_clouds != auto_cloud else weather_entity
-                days = await self.hass.async_add_executor_job(
-                    _count_entity_history_days, db_url, check_entity
-                )
-
-                warn_parts: list[str] = []
-                if days < MIN_HISTORY_DAYS:
-                    warn_parts.append(
-                        _format_warning(
-                            self.hass, "low_history",
-                            entity=check_entity, days=days, min_days=MIN_HISTORY_DAYS,
-                        )
-                    )
-
-                if warn_parts and not getattr(self, "_opts_history_warning_confirmed", False):
-                    self._opts_history_warning_confirmed = True
-                    pids = _get_percent_sensor_ids(self.hass)
-                    eids = _get_energy_sensor_ids(self.hass)
-                    uids = _get_uv_sensor_ids(self.hass)
-                    cloud_warn_val = sensor_clouds if sensor_clouds != auto_cloud else None
-                    uv_warn_val = sensor_uv if sensor_uv != f"sensor.{prefix}_uv" else None
-                    cloud_warn_key = (
-                        vol.Optional(CONF_SENSOR_CLOUDS, default=cloud_warn_val)
-                        if cloud_warn_val is not None
-                        else vol.Optional(CONF_SENSOR_CLOUDS)
-                    )
-                    uv_warn_key = (
-                        vol.Optional(CONF_SENSOR_UV, default=uv_warn_val)
-                        if uv_warn_val is not None
-                        else vol.Optional(CONF_SENSOR_UV)
-                    )
-                    warn_schema = vol.Schema({
-                        vol.Required(CONF_WEATHER_ENTITY, default=weather_entity):
-                            EntitySelector(EntitySelectorConfig(domain="weather", multiple=False)),
-                        cloud_warn_key:
-                            EntitySelector(EntitySelectorConfig(include_entities=pids, multiple=False) if pids else EntitySelectorConfig(domain="sensor", multiple=False)),
-                        uv_warn_key:
-                            EntitySelector(EntitySelectorConfig(include_entities=uids, multiple=False) if uids else EntitySelectorConfig(domain="sensor", multiple=False)),
-                        vol.Optional(CONF_PV_HISTORY_DAYS, default=history_days):
-                            vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
-                        vol.Required(CONF_SENSOR_PV, default=sensor_pv_list):
-                            EntitySelector(EntitySelectorConfig(include_entities=eids, multiple=True) if eids else EntitySelectorConfig(domain="sensor", multiple=True)),
-                    })
-                    return self.async_show_form(
-                        step_id="init",
-                        data_schema=warn_schema,
-                        errors={},
-                        description_placeholders={"weather_history_warning": "\n\n".join(warn_parts)},
-                    )
-                self._opts_history_warning_confirmed = False
-                # -----------------------------------------------------------
-
-                # Always store new weather entity and regenerate SQL
                 user_input[CONF_WEATHER_ENTITY] = weather_entity
-                user_input[CONF_SENSOR_CLOUDS] = sensor_clouds
-                user_input[CONF_SENSOR_UV] = sensor_uv
+                _apply_auto_sensors(user_input, prefix)
                 user_input[CONF_SENSOR_PV] = sensor_pv_list
-                _pv_sql_list = ", ".join(f"'{s}'" for s in sensor_pv_list)
-                _pv_first = sensor_pv_list[0] if sensor_pv_list else ""
-                user_input["sql_query"] = DEFAULT_SQL_QUERY.format(
-                    sensor_clouds=sensor_clouds,
-                    sensor_pv_list=_pv_sql_list,
-                    sensor_pv_first=_pv_first,
+                user_input[CONF_RETUNE] = bool(
+                    user_input.get(
+                        CONF_RETUNE,
+                        _resolve_retune_enabled(options, data, default_if_missing=False),
+                    )
+                )
+                user_input.pop("retune_mode", None)
+                user_input["sql_query"] = _build_sql_query(
+                    prefix=prefix,
+                    sensor_pv_list=sensor_pv_list,
                     sensor_forecast=sensor_forecast,
-                    sensor_uv=sensor_uv,
                     history_days=history_days,
                     weather_entity=weather_entity,
                 )
 
                 return self.async_create_entry(title="", data=user_input)
 
-        options = self.config_entry.options or {}
         data = self.config_entry.data
 
-        def _opt(key, fallback=None):
-            return options.get(key, data.get(key, fallback))
-
-        percent_ids = _get_percent_sensor_ids(self.hass)
-        energy_ids = _get_energy_sensor_ids(self.hass)
-        uv_ids = _get_uv_sensor_ids(self.hass)
-        cloud_selector = EntitySelector(
-            EntitySelectorConfig(include_entities=percent_ids, multiple=False)
-            if percent_ids
-            else EntitySelectorConfig(domain="sensor", multiple=False)
+        return self.async_show_form(
+            step_id="init",
+            data_schema=self._get_options_schema(data, options),
+            errors=errors,
         )
+
+    def _get_options_schema(
+        self,
+        data: dict[str, Any],
+        options: dict[str, Any],
+        *,
+        defaults: dict[str, Any] | None = None,
+    ) -> vol.Schema:
+        """Schema for options step (weather + PV only)."""
+        d = defaults or {}
+
+        def _opt(key: str, fallback: Any = None) -> Any:
+            val = options.get(key, None)
+            if val is None:
+                return data.get(key, fallback)
+            return val
+
+        energy_ids = _get_energy_sensor_ids(self.hass)
         pv_selector = EntitySelector(
             EntitySelectorConfig(include_entities=energy_ids, multiple=True)
             if energy_ids
             else EntitySelectorConfig(domain="sensor", device_class="energy", multiple=True)
         )
-        uv_selector = EntitySelector(
-            EntitySelectorConfig(include_entities=uv_ids, multiple=False)
-            if uv_ids
-            else EntitySelectorConfig(domain="sensor", multiple=False)
-        )
-        _pv_default = _opt(CONF_SENSOR_PV, [])
+        _pv_default = d.get(CONF_SENSOR_PV, _opt(CONF_SENSOR_PV, []))
         if isinstance(_pv_default, str):
             _pv_default = [_pv_default] if _pv_default else []
-        schema = vol.Schema(
+        return vol.Schema(
             {
                 vol.Required(
                     CONF_WEATHER_ENTITY,
-                    default=_opt(CONF_WEATHER_ENTITY, ""),
+                    default=d.get(CONF_WEATHER_ENTITY, _opt(CONF_WEATHER_ENTITY, "")),
                 ): EntitySelector(EntitySelectorConfig(domain="weather", multiple=False)),
-                vol.Optional(
-                    CONF_SENSOR_CLOUDS,
-                    default=_opt(CONF_SENSOR_CLOUDS),
-                ): cloud_selector,
-                vol.Optional(
-                    CONF_SENSOR_UV,
-                    default=_opt(CONF_SENSOR_UV),
-                ): uv_selector,
+                vol.Required(CONF_SENSOR_PV, default=_pv_default): pv_selector,
                 vol.Optional(
                     CONF_PV_HISTORY_DAYS,
-                    default=_opt(CONF_PV_HISTORY_DAYS, 30),
+                    default=d.get(CONF_PV_HISTORY_DAYS, _opt(CONF_PV_HISTORY_DAYS, 30)),
                 ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
-                vol.Required(
-                    CONF_SENSOR_PV,
-                    default=_pv_default,
-                ): pv_selector,
                 vol.Optional(
                     CONF_PV_MAX_RECORD,
-                    default=_opt(CONF_PV_MAX_RECORD, DEFAULT_PV_MAX_RECORD),
+                    default=d.get(CONF_PV_MAX_RECORD, _opt(CONF_PV_MAX_RECORD, DEFAULT_PV_MAX_RECORD)),
                 ): vol.Coerce(float),
+                vol.Optional(
+                    CONF_RETUNE,
+                    default=d.get(
+                        CONF_RETUNE,
+                        _resolve_retune_enabled(options, data, default_if_missing=False),
+                    ),
+                ): bool,
             }
         )
-
-        return self.async_show_form(step_id="init", data_schema=schema, errors=errors, description_placeholders={"weather_history_warning": ""})

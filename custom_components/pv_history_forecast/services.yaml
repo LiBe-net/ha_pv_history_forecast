@@ -1,0 +1,45 @@
+trigger_full_retune:
+  name: Trigger Retune
+  description: Run a manual retune for a PV History Forecast main sensor from GUI, script, or automation.
+  fields:
+    entity_id:
+      name: Main Sensor Entity ID
+      description: Target sensor entity, e.g. sensor.pv_hist_remaining_today.
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+    entry_id:
+      name: Config Entry ID
+      description: Alternative target by config entry ID when entity_id is not provided.
+      selector:
+        text:
+    force_refresh:
+      name: Force SQL Refresh
+      description: Refresh SQL data immediately before running retune.
+      default: true
+      selector:
+        boolean:
+
+force_retune:
+  name: Force Retune
+  description: Alias for trigger_full_retune. Run a manual retune for a PV History Forecast main sensor.
+  fields:
+    entity_id:
+      name: Main Sensor Entity ID
+      description: Target sensor entity, e.g. sensor.pv_hist_remaining_today.
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+    entry_id:
+      name: Config Entry ID
+      description: Alternative target by config entry ID when entity_id is not provided.
+      selector:
+        text:
+    force_refresh:
+      name: Force SQL Refresh
+      description: Refresh SQL data immediately before running retune.
+      default: true
+      selector:
+        boolean:

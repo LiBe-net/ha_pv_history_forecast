@@ -8,6 +8,29 @@ based on historical yield data from the Home Assistant database.
 
 **full Documentation:** [www.libe.net/pv-forecast](https://www.libe.net/pv-forecast)
 
+## Breaking change in 0.3
+
+Version 0.3 adds precipitation and temperature to the forecast model and
+introduces an automatic retune mechanism for forecast parameters.
+
+Version 0.3 provides fewer forecast helper sensors than 0.2.x. The following
+dedicated forecast helper sensors are no longer created:
+
+- `sensor.<prefix>_cloud_remaining_today` (default: `sensor.pv_hist_cloud_remaining_today`)
+- `sensor.<prefix>_cloud_tomorrow` (default: `sensor.pv_hist_cloud_tomorrow`)
+- `sensor.<prefix>_method_remaining_today` (default: `sensor.pv_hist_method_remaining_today`)
+- `sensor.<prefix>_method_tomorrow` (default: `sensor.pv_hist_method_tomorrow`)
+- `sensor.<prefix>_uv_remaining_today` (default: `sensor.pv_hist_uv_remaining_today`)
+- `sensor.<prefix>_uv_tomorrow` (default: `sensor.pv_hist_uv_tomorrow`)
+
+The relevant forecast details are still shown in the Markdown/Lovelace
+attributes of `sensor.<prefix>_remaining_today`.
+
+When upgrading from an earlier version, Home Assistant may keep the old entity
+registry entries. Please remove the obsolete entities manually in
+**Settings -> Devices & services -> Entities**. The integration does not delete
+them automatically during the update.
+
 ## Installation
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=LiBe-net&repository=ha_pv_history_forecast&category=integration)
 
@@ -25,9 +48,8 @@ Want to see what's going on? Simply add a Markdown card to get an overview of ho
 ```yaml
 type: markdown
 content: >-
-  Forecast remaining today: <b><big>{{ states.sensor.pv_hist_remaining_today.state | round(2)}} kWh</big></b> 
-  remaining cloud cover: <b><big>{{ states.sensor.pv_hist_cloud_remaining_today.state }}%</big></b>
-  
+  Forecast remaining today: <b><big>{{ states.sensor.pv_hist_remaining_today.state | round(2)}} kWh</big></b>
+
   {{ state_attr('sensor.pv_hist_remaining_today', 'lovelace_card_remaining_today') }}
 ```
 
@@ -36,8 +58,7 @@ content: >-
 type: markdown
 content: >-
   Forecast remaining for tomorrow: <b><big>{{ states.sensor.pv_hist_tomorrow.state | round(2)}} kWh</big></b>
-  Cloud cover tomorrow: <b><big>{{ states.sensor.pv_hist_cloud_tomorrow.state }}%</big></b>
-  
+
   {{ state_attr('sensor.pv_hist_remaining_today', 'lovelace_card_tomorrow') }}
 ```
 If you are not using the default prefix, you will need to adjust the names.
