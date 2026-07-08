@@ -171,72 +171,111 @@ def _apply_adaptive_ema_smoothing(
     *,
     day_reset: bool = False,
     step_count: int = 0,
+    up_hold_cycles: int = 3,
 ) -> tuple[float | str | None, int]:
-    """Apply direction-aware EMA smoothing for 5-minute forecast updates.
+    """Apply adaptive EMA smoothing with smooth S-curve convergence.
 
-    ``step_count`` stores the active trend direction:
-      positive = target is falling, negative = target is rising, 0 = neutral.
+    Designed for 5-minute updates:
+      positive step_count = persistent falling target
+      negative step_count = persistent rising target
 
-    Day reset and missing old values are adopted directly. Normal updates ease
-    in after a direction change, speed up while the trend persists, and ease out
-    near the target. Falling values keep a higher minimum alpha because the
-    remaining-day forecast usually decreases through the day.
+    Day reset and missing old values are adopted directly. Falling values start
+    moving immediately and accelerate while the trend persists. Rising values
+    are intentionally very slow, especially after a falling trend.
     """
     if new_val is None:
         return old_val, step_count
 
+    if day_reset:
+        try:
+            return round(float(new_val), 3), 0
+        except (ValueError, TypeError):
+            return new_val, 0
+
+    if old_val is None or old_val == 0 or old_val == 0.0:
+        try:
+            return round(float(new_val), 3), 0
+        except (ValueError, TypeError):
+            return new_val, 0
+
     try:
         new_f = float(new_val)
-    except (ValueError, TypeError):
-        return new_val, 0
-
-    if day_reset or old_val is None:
-        return round(new_f, 3), 0
-
-    try:
         old_f = float(old_val)
     except (ValueError, TypeError):
         return new_val, 0
 
-    gap = new_f - old_f
-    if abs(gap) <= 0.001:
+    raw_gap = new_f - old_f
+    if abs(raw_gap) <= 0.001:
         return round(new_f, 3), 0
 
-    def _smoothstep(value: float) -> float:
-        value = max(0.0, min(1.0, value))
-        return value * value * (3.0 - 2.0 * value)
+    ref_val = max(abs(old_f), pv_max * 0.05, 1.0)
+    gap_ratio = abs(raw_gap) / ref_val
+    is_down = raw_gap < 0.0
+    is_up = raw_gap > 0.0
 
-    is_down = gap < 0.0
-    direction = 1 if is_down else -1
-    previous_direction = 1 if step_count > 0 else -1 if step_count < 0 else 0
-
-    if previous_direction == direction:
-        new_step_count = max(-30, min(30, step_count + direction))
+    prev_down = step_count > 0
+    prev_up = step_count < 0
+    if step_count == 0:
+        new_step_count = 1 if is_down else -1
+    elif is_down and prev_down:
+        new_step_count = min(step_count + 1, 30)
+    elif is_up and prev_up:
+        new_step_count = max(step_count - 1, -30)
     else:
-        new_step_count = direction
+        new_step_count = 1 if is_down else -1
 
-    trend = _smoothstep(abs(new_step_count) / 6.0)
-    ref_val = max(abs(new_f), abs(old_f), pv_max * 0.05, 1.0)
-    gap_strength = _smoothstep(abs(gap) / (ref_val * 0.30))
+    n = abs(new_step_count)
+    progress = min(n / 5.0, 1.0)
+    ease_in = progress * progress * (3.0 - 2.0 * progress)
 
     if is_down:
-        alpha_start, alpha_peak, alpha_near = 0.28, 0.72, 0.38
+        alpha_min = 0.25
+        alpha_max = 0.60
     else:
-        alpha_start, alpha_peak, alpha_near = 0.015, 0.22, 0.04
+        alpha_min = 0.02
+        alpha_max = 0.15
 
-    accelerated_alpha = alpha_start + (alpha_peak - alpha_start) * trend
-    alpha = alpha_near + (accelerated_alpha - alpha_near) * gap_strength
+    alpha_ease_in = alpha_min + (alpha_max - alpha_min) * ease_in
 
-    # A down-to-up reversal is deliberately damped for the first two cycles.
-    if not is_down and previous_direction == 1:
-        alpha *= 0.35 if abs(new_step_count) == 1 else 0.65
-
-    delta = gap * alpha
-    cap_base = max(pv_max, ref_val)
     if is_down:
-        cap = cap_base * (0.18 + 0.22 * trend)
+        if gap_ratio >= 0.5:
+            alpha_ease_out = alpha_max
+        elif gap_ratio >= 0.3:
+            alpha_ease_out = alpha_max * 0.98
+        elif gap_ratio >= 0.15:
+            alpha_ease_out = alpha_max * 0.90
+        elif gap_ratio >= 0.08:
+            alpha_ease_out = alpha_max * 0.75
+        else:
+            alpha_ease_out = alpha_max * 0.65
     else:
-        cap = cap_base * (0.012 + 0.028 * trend)
+        if gap_ratio >= 0.5:
+            alpha_ease_out = alpha_max
+        elif gap_ratio >= 0.15:
+            out_progress = (gap_ratio - 0.15) / 0.35
+            alpha_ease_out = alpha_min * 0.5 + (alpha_max - alpha_min * 0.5) * out_progress
+        else:
+            alpha_ease_out = alpha_min * 0.3
+
+    step_boost = 1.0
+    if is_down and n >= 3:
+        step_boost = 1.0 + (min(n - 2, 7) * 0.12)
+
+    ease_out_weight = min(n / 15.0, 1.0) if is_down else min(n / 20.0, 1.0)
+    alpha = (1.0 - ease_out_weight) * alpha_ease_in + ease_out_weight * alpha_ease_out
+    alpha = min(alpha * step_boost, alpha_max * 1.2)
+
+    if is_up and prev_down and n <= up_hold_cycles:
+        alpha *= 0.1
+
+    blended = alpha * new_f + (1.0 - alpha) * old_f
+    delta = blended - old_f
+    if is_down:
+        base_cap = pv_max * 0.12 if pv_max > 0 else ref_val * 0.12
+        cap = base_cap * (0.4 + 1.8 * ease_in + 0.8 * step_boost)
+    else:
+        base_cap = pv_max * 0.02 if pv_max > 0 else ref_val * 0.02
+        cap = base_cap * (0.5 + 0.5 * ease_in)
     delta = max(min(delta, cap), -cap)
 
     return round(old_f + delta, 3), new_step_count
@@ -871,27 +910,16 @@ FROM vars
                     # First call of the day but we have a restored value: use it directly
                     is_day_reset = True
 
-                # Apply EMA when value changes or after 5 minutes (sync with SQL update frequency)
-                # Check if new_val is actually different from what we had before
-                value_changed = False
-                if new_val is not None and self._attr_native_value is not None:
-                    try:
-                        new_f = float(new_val)
-                        old_f = float(self._attr_native_value)
-                        # Consider it "changed" if difference is > 0.001 (very small threshold)
-                        value_changed = abs(new_f - old_f) > 0.001
-                    except (ValueError, TypeError):
-                        value_changed = str(new_val) != str(self._attr_native_value)
-                elif new_val is not None or self._attr_native_value is not None:
-                    value_changed = True
-
-                # Update EMA if: day reset, first time, value changed, or 5 min passed
+                # Apply EMA on the 5-minute cadence. The smoothing function itself
+                # accelerates persistent downward trends via _last_ema_step; updating
+                # on every small value change would consume those steps too quickly.
+                # Update EMA if: day reset, first time, missing current value, or 5 min passed
                 time_since_ema = (now - self._last_ema_time).total_seconds() if self._last_ema_time else float('inf')
                 should_update_ema = (
                     is_day_reset or
                     self._last_ema_time is None or
-                    value_changed or  # Update immediately when value changes
-                    time_since_ema >= 300  # Failsafe: update every 5 minutes anyway
+                    (self._attr_native_value is None and new_val is not None) or
+                    time_since_ema >= 300  # Sync with SQL/LTS cadence
                 )
 
                 if should_update_ema:
@@ -1841,12 +1869,12 @@ class PVForecastTemplateSensor(SensorEntity, RestoreEntity):
         today_str = now_dt.strftime("%Y-%m-%d")
         raw_date = main_state.attributes.get("json_generated_for_date")
         raw_is_current_day = raw_date == today_str
+        if not raw_is_current_day:
+            self._attr_available = self._attr_native_value is not None
+            return
         is_day_reset = self._last_ema_date is not None and self._last_ema_date != today_str
         if not is_day_reset and self._last_ema_date is None and self._attr_native_value is not None:
             is_day_reset = True
-        if is_day_reset and not raw_is_current_day:
-            self._attr_available = self._attr_native_value is not None
-            return
         raw = main_state.attributes["json"]
         new_val = self._apply_template(raw)
 
@@ -1868,14 +1896,14 @@ class PVForecastTemplateSensor(SensorEntity, RestoreEntity):
         today_str = now_dt.strftime("%Y-%m-%d")
         raw_date = main_state.attributes.get("json_generated_for_date")
         raw_is_current_day = raw_date == today_str
+        if not raw_is_current_day:
+            self._attr_available = self._attr_native_value is not None
+            return
 
         # Determine day reset condition
         is_day_reset = self._last_ema_date is not None and self._last_ema_date != today_str
         if not is_day_reset and self._last_ema_date is None and self._attr_native_value is not None:
             is_day_reset = True
-        if is_day_reset and not raw_is_current_day:
-            self._attr_available = self._attr_native_value is not None
-            return
 
         # OBERSTES GEBOT FÜR DEN TAGESWECHSEL:
         # Egal wann das erste Update nach Mitternacht kommt (0:00, 0:05 oder 0:10):
@@ -1890,24 +1918,14 @@ class PVForecastTemplateSensor(SensorEntity, RestoreEntity):
             self._last_processed_main_json_stamp = main_json_stamp
             return
 
-        # Apply EMA when value changes or after 5 minutes (sync with SQL update frequency)
-        value_changed = False
-        if new_val is not None and self._attr_native_value is not None:
-            try:
-                new_f = float(new_val)
-                old_f = float(self._attr_native_value)
-                value_changed = abs(new_f - old_f) > 0.001
-            except (ValueError, TypeError):
-                value_changed = str(new_val) != str(self._attr_native_value)
-        elif new_val is not None or self._attr_native_value is not None:
-            value_changed = True
-
-        # Update EMA if: first time, value changed, or 5 min passed
+        # Apply EMA on the 5-minute cadence. Persistent downward trends still
+        # accelerate inside _apply_adaptive_ema_smoothing via _last_ema_step.
+        # Update EMA if: first time, missing current value, or 5 min passed
         # (is_day_reset wurde oben bereits abgefangen und per return beendet)
         time_since_ema = (now_dt - self._last_ema_time).total_seconds() if self._last_ema_time else float('inf')
         should_update_ema = (
             self._last_ema_time is None or
-            value_changed or
+            (self._attr_native_value is None and new_val is not None) or
             time_since_ema >= 300
         )
 
