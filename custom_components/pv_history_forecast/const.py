@@ -216,14 +216,11 @@ DEFAULT_VALUE_TEMPLATE = PREP_AND_POOL_BUILDING + """
       {% set remaining_live = estimated_rest - live_hour_delta %}
       {% set current_minutes = (now().hour * 60 + now().minute) | int %}
       {% set minutes_to_sunset = (end_min_local - current_minutes) | int %}
-      {% set live_plateau = 0.8 * estimated_rest %}
-      {% set protected_rest = [remaining_live, live_plateau] | max %}
-      {% if minutes_to_sunset <= 0 or remaining_live < 0.01 %}
+      {% set live_floor = (0.8 * estimated_rest * (minutes_to_sunset - now().minute)) / ([minutes_to_sunset, 1] | max) %}
+      {% if minutes_to_sunset <= 0 %}
         {% set final_val = 0.0 %}
-      {% elif minutes_to_sunset < 60 %}
-        {% set final_val = [protected_rest, protected_rest * (minutes_to_sunset / 60.0)] | min %}
       {% else %}
-        {% set final_val = protected_rest %}
+        {% set final_val = [remaining_live, live_floor, 0.0] | max %}
       {% endif %}
       {{ [final_val, 0.0] | max | round(2) }}
     {% endif %}
@@ -257,14 +254,11 @@ DEFAULT_VALUE_TEMPLATE_MIN = PREP_AND_POOL_BUILDING + """
       {% set remaining_live = estimated_rest - live_hour_delta %}
       {% set current_minutes = (now().hour * 60 + now().minute) | int %}
       {% set minutes_to_sunset = (end_min_local - current_minutes) | int %}
-      {% set live_plateau = 0.8 * estimated_rest %}
-      {% set protected_rest = [remaining_live, live_plateau] | max %}
-      {% if minutes_to_sunset <= 0 or remaining_live < 0.01 %}
+      {% set live_floor = (0.8 * estimated_rest * (minutes_to_sunset - now().minute)) / ([minutes_to_sunset, 1] | max) %}
+      {% if minutes_to_sunset <= 0 %}
         {% set final_val = 0.0 %}
-      {% elif minutes_to_sunset < 60 %}
-        {% set final_val = [protected_rest, protected_rest * (minutes_to_sunset / 60.0)] | min %}
       {% else %}
-        {% set final_val = protected_rest %}
+        {% set final_val = [remaining_live, live_floor, 0.0] | max %}
       {% endif %}
       {{ final_val | round(2) }}
     {% endif %}
@@ -298,14 +292,11 @@ DEFAULT_VALUE_TEMPLATE_MAX = PREP_AND_POOL_BUILDING + """
       {% set remaining_live = estimated_rest - live_hour_delta %}
       {% set current_minutes = (now().hour * 60 + now().minute) | int %}
       {% set minutes_to_sunset = (end_min_local - current_minutes) | int %}
-      {% set live_plateau = 0.8 * estimated_rest %}
-      {% set protected_rest = [remaining_live, live_plateau] | max %}
-      {% if minutes_to_sunset <= 0 or remaining_live < 0.01 %}
+      {% set live_floor = (0.8 * estimated_rest * (minutes_to_sunset - now().minute)) / ([minutes_to_sunset, 1] | max) %}
+      {% if minutes_to_sunset <= 0 %}
         {% set final_val = 0.0 %}
-      {% elif minutes_to_sunset < 60 %}
-        {% set final_val = [protected_rest, protected_rest * (minutes_to_sunset / 60.0)] | min %}
       {% else %}
-        {% set final_val = protected_rest %}
+        {% set final_val = [remaining_live, live_floor, 0.0] | max %}
       {% endif %}
       {{ final_val | round(2) }}
     {% endif %}

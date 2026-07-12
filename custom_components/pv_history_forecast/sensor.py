@@ -205,9 +205,6 @@ def _apply_adaptive_ema_smoothing(
         return new_val, 0
 
     raw_gap = new_f - old_f
-    if abs(raw_gap) <= 0.001:
-        return round(new_f, 3), 0
-
     ref_val = max(abs(old_f), pv_max * 0.05, 1.0)
     gap_ratio = abs(raw_gap) / ref_val
     is_down = raw_gap < 0.0
@@ -265,7 +262,7 @@ def _apply_adaptive_ema_smoothing(
     alpha = (1.0 - ease_out_weight) * alpha_ease_in + ease_out_weight * alpha_ease_out
     alpha = min(alpha * step_boost, alpha_max * 1.2)
 
-    if is_up and prev_down and n <= up_hold_cycles:
+    if is_up and prev_down and n <= 2:
         alpha *= 0.1
 
     blended = alpha * new_f + (1.0 - alpha) * old_f
