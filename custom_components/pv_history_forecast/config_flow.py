@@ -37,6 +37,7 @@ from .const import (
     DEFAULT_DEVICE_CLASS,
     DEFAULT_STATE_CLASS,
     DEFAULT_PV_MAX_RECORD,
+    DEFAULT_PV_HISTORY_DAYS,
     DEFAULT_SQL_QUERY,
     DOMAIN,
 )
@@ -262,7 +263,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data[CONF_SENSOR_FORECAST] = f"sensor.{prefix}_weather_forecast"
             _apply_auto_sensors(data, prefix)
 
-            history_days = data.get(CONF_PV_HISTORY_DAYS, 30)
+            history_days = data.get(CONF_PV_HISTORY_DAYS, DEFAULT_PV_HISTORY_DAYS)
             _pv_entries = data[CONF_SENSOR_PV]
             if isinstance(_pv_entries, str):
                 _pv_entries = [_pv_entries] if _pv_entries else []
@@ -327,7 +328,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ): pv_selector,
                 vol.Optional(
                     CONF_PV_HISTORY_DAYS,
-                    default=d.get(CONF_PV_HISTORY_DAYS, 30),
+                    default=d.get(CONF_PV_HISTORY_DAYS, DEFAULT_PV_HISTORY_DAYS),
                 ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
                 vol.Optional(
                     CONF_RETUNE,
@@ -362,7 +363,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_SENSOR_PV, default=_pv_default): pv_selector,
                 vol.Optional(
                     CONF_PV_HISTORY_DAYS,
-                    default=d.get(CONF_PV_HISTORY_DAYS, data.get(CONF_PV_HISTORY_DAYS, 30)),
+                    default=d.get(CONF_PV_HISTORY_DAYS, data.get(CONF_PV_HISTORY_DAYS, DEFAULT_PV_HISTORY_DAYS)),
                 ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
                 vol.Optional(
                     CONF_RETUNE,
@@ -416,7 +417,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     errors=errors,
                 )
 
-            history_days = user_input.get(CONF_PV_HISTORY_DAYS, data.get(CONF_PV_HISTORY_DAYS, 30))
+            history_days = user_input.get(CONF_PV_HISTORY_DAYS, data.get(CONF_PV_HISTORY_DAYS, DEFAULT_PV_HISTORY_DAYS))
             supports_forecasts = await _check_weather_supports_forecasts(self.hass, weather_entity)
             if not supports_forecasts:
                 return self.async_show_form(
@@ -500,7 +501,7 @@ class OptionsFlow(config_entries.OptionsFlow):
 
             if not errors:
                 sensor_forecast = data.get(CONF_SENSOR_FORECAST, f"sensor.{prefix}_weather_forecast")
-                history_days = user_input.get(CONF_PV_HISTORY_DAYS, data.get(CONF_PV_HISTORY_DAYS, 30))
+                history_days = user_input.get(CONF_PV_HISTORY_DAYS, data.get(CONF_PV_HISTORY_DAYS, DEFAULT_PV_HISTORY_DAYS))
 
                 supports_forecasts = await _check_weather_supports_forecasts(self.hass, weather_entity)
                 if not supports_forecasts:
@@ -580,7 +581,7 @@ class OptionsFlow(config_entries.OptionsFlow):
                 vol.Required(CONF_SENSOR_PV, default=_pv_default): pv_selector,
                 vol.Optional(
                     CONF_PV_HISTORY_DAYS,
-                    default=d.get(CONF_PV_HISTORY_DAYS, _opt(CONF_PV_HISTORY_DAYS, 30)),
+                    default=d.get(CONF_PV_HISTORY_DAYS, _opt(CONF_PV_HISTORY_DAYS, DEFAULT_PV_HISTORY_DAYS)),
                 ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
                 vol.Optional(
                     CONF_PV_MAX_RECORD,

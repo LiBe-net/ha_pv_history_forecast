@@ -55,6 +55,7 @@ from .const import (
     DEFAULT_UNIT_OF_MEASUREMENT,
     DEFAULT_DEVICE_CLASS,
     DEFAULT_STATE_CLASS,
+    DEFAULT_PV_HISTORY_DAYS,
     DEFAULT_PV_MAX_RECORD,
     DOMAIN,
 )
@@ -317,7 +318,7 @@ async def async_setup_entry(
         sensor_temp = f"sensor.{prefix}_temperature"
     if not sensor_precip:
         sensor_precip = f"sensor.{prefix}_precipitation"
-    history_days = options.get(CONF_PV_HISTORY_DAYS, data.get(CONF_PV_HISTORY_DAYS, 30))
+    history_days = options.get(CONF_PV_HISTORY_DAYS, data.get(CONF_PV_HISTORY_DAYS, DEFAULT_PV_HISTORY_DAYS))
     weather_entity = options.get(CONF_WEATHER_ENTITY) or data.get(CONF_WEATHER_ENTITY, "")
     try:
         _pv_sql_list = ", ".join(f"'{s}'" for s in sensor_pv)
@@ -490,7 +491,7 @@ def _handle_options_update(
     if not sensor._sensor_precip:
         prefix = data.get(CONF_SENSOR_PREFIX, DEFAULT_SENSOR_PREFIX)
         sensor._sensor_precip = f"sensor.{prefix}_precipitation"
-    sensor._pv_history_days = options.get(CONF_PV_HISTORY_DAYS, data.get(CONF_PV_HISTORY_DAYS, 30))
+    sensor._pv_history_days = options.get(CONF_PV_HISTORY_DAYS, data.get(CONF_PV_HISTORY_DAYS, DEFAULT_PV_HISTORY_DAYS))
     sensor._unit_of_measurement = options.get(CONF_UNIT_OF_MEASUREMENT, DEFAULT_UNIT_OF_MEASUREMENT)
     sensor._device_class, sensor._state_class = _normalize_device_state_class(
         options.get(CONF_DEVICE_CLASS, DEFAULT_DEVICE_CLASS),

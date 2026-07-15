@@ -285,7 +285,7 @@ DEFAULT_VALUE_TEMPLATE_MAX = PREP_AND_POOL_BUILDING + """
         {% endif %}
       {% endif %}
 
-      {% set res_val = base_max.val * global_loo_factor.val * global_trend_factor.val %}
+      {% set res_val = ([base_max.val, global_base_yield] | max) * global_loo_factor.val * global_trend_factor.val %}
 
       {% set live_hour_delta = data.live_hour_delta | default(0.0) | float %}
       {% set estimated_rest = (res_val * snow_factor_today.val) | float %}
@@ -435,7 +435,7 @@ DEFAULT_VALUE_TEMPLATE_TOMORROW = """{# PV FORECAST TOMORROW: weighted average #
 DEFAULT_UNIT_OF_MEASUREMENT = "kWh"
 DEFAULT_DEVICE_CLASS = "energy"
 DEFAULT_STATE_CLASS = "measurement"
-DEFAULT_PV_HISTORY_DAYS = 60
+DEFAULT_PV_HISTORY_DAYS = 90
 DEFAULT_PV_MAX_RECORD = 0.0
 DEFAULT_RETUNE = True
 
