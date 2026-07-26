@@ -33,6 +33,10 @@ env/
 .dmypy.json
 dmypy.json
 sql_integration_query_tests/
+!sql_integration_query_tests/
+sql_integration_query_tests/*
+!sql_integration_query_tests/current-query.sql
+!sql_integration_query_tests/current-query-optimized.sql
 parameters-owm.txt
 parameters.txt
 retune_template_sensors.yaml

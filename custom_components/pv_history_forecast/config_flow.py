@@ -96,8 +96,8 @@ def _resolve_retune_enabled(
 ) -> bool:
     """Resolve retune flag with explicit legacy fallback behavior.
 
-    Existing entries created before the retune option existed should stay
-    non-retuned unless the user explicitly enables it.
+    Existing entries created before the retune option existed use the current
+    default. An explicitly stored value always takes precedence.
     """
     opts = options or {}
     entry_data = data or {}
@@ -329,7 +329,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(
                     CONF_PV_HISTORY_DAYS,
                     default=d.get(CONF_PV_HISTORY_DAYS, DEFAULT_PV_HISTORY_DAYS),
-                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
+                ): vol.All(vol.Coerce(int), vol.Range(min=1)),
                 vol.Optional(
                     CONF_RETUNE,
                     default=d.get(CONF_RETUNE, DEFAULT_RETUNE),
@@ -364,12 +364,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(
                     CONF_PV_HISTORY_DAYS,
                     default=d.get(CONF_PV_HISTORY_DAYS, data.get(CONF_PV_HISTORY_DAYS, DEFAULT_PV_HISTORY_DAYS)),
-                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
+                ): vol.All(vol.Coerce(int), vol.Range(min=1)),
                 vol.Optional(
                     CONF_RETUNE,
                     default=d.get(
                         CONF_RETUNE,
-                        _resolve_retune_enabled(None, data, default_if_missing=False),
+                        _resolve_retune_enabled(
+                            None, data, default_if_missing=DEFAULT_RETUNE
+                        ),
                     ),
                 ): bool,
             }
@@ -441,7 +443,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_RETUNE: bool(
                     user_input.get(
                         CONF_RETUNE,
-                        _resolve_retune_enabled(None, data, default_if_missing=False),
+                        _resolve_retune_enabled(
+                            None, data, default_if_missing=DEFAULT_RETUNE
+                        ),
                     )
                 ),
             })
@@ -525,7 +529,9 @@ class OptionsFlow(config_entries.OptionsFlow):
                 user_input[CONF_RETUNE] = bool(
                     user_input.get(
                         CONF_RETUNE,
-                        _resolve_retune_enabled(options, data, default_if_missing=False),
+                        _resolve_retune_enabled(
+                            options, data, default_if_missing=DEFAULT_RETUNE
+                        ),
                     )
                 )
                 user_input.pop("retune_mode", None)
@@ -582,7 +588,7 @@ class OptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_PV_HISTORY_DAYS,
                     default=d.get(CONF_PV_HISTORY_DAYS, _opt(CONF_PV_HISTORY_DAYS, DEFAULT_PV_HISTORY_DAYS)),
-                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=365)),
+                ): vol.All(vol.Coerce(int), vol.Range(min=1)),
                 vol.Optional(
                     CONF_PV_MAX_RECORD,
                     default=d.get(CONF_PV_MAX_RECORD, _opt(CONF_PV_MAX_RECORD, DEFAULT_PV_MAX_RECORD)),
@@ -591,7 +597,9 @@ class OptionsFlow(config_entries.OptionsFlow):
                     CONF_RETUNE,
                     default=d.get(
                         CONF_RETUNE,
-                        _resolve_retune_enabled(options, data, default_if_missing=False),
+                        _resolve_retune_enabled(
+                            options, data, default_if_missing=DEFAULT_RETUNE
+                        ),
                     ),
                 ): bool,
             }

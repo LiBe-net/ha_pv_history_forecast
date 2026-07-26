@@ -448,7 +448,26 @@ DEFAULT_SQL_QUERY = """WITH vars AS (
         '{sensor_temp}' as sensor_temp,
         '{sensor_precip}' as sensor_precip,
         '{weather_entity}' as weather_entity,
-        (strftime('%s', 'now', 'localtime') - strftime('%s', 'now')) || ' seconds' as offset
+        (strftime('%s', 'now', 'localtime') - strftime('%s', 'now')) || ' seconds' as offset,
+        CAST(strftime('%s', 'now', 'localtime') - strftime('%s', 'now') AS INTEGER) as offset_seconds,
+        {history_days} as history_days
+),
+
+/* Compute the history boundary once. The original predicate is
+   local_date(row) > local_date(now - history_days), so the first included
+   timestamp is local midnight one day after that boundary. */
+clock AS (
+    SELECT
+        CAST(strftime(
+            '%s',
+            date(
+                'now',
+                offset,
+                printf('-%d days', history_days),
+                '+1 day'
+            )
+        ) AS INTEGER) - offset_seconds as history_start_ts
+    FROM vars
 ),
 
 ids AS (
@@ -562,7 +581,7 @@ pv_live_current_hour_delta AS (
 weather_history_raw AS (
     SELECT (CAST(start_ts AS INT) / 3600) * 3600 as ts, CAST(COALESCE(mean, state) AS FLOAT) as cloud_val, NULL as uv_val, NULL as temp_val, NULL as precip_val
     FROM statistics
-    WHERE metadata_id = (SELECT cloud_id_statistics FROM ids) AND date(start_ts, 'unixepoch', (SELECT offset FROM vars)) > date('now', (SELECT offset FROM vars), '-{history_days} days')
+    WHERE metadata_id = (SELECT cloud_id_statistics FROM ids) AND start_ts >= (SELECT history_start_ts FROM clock)
 
     UNION ALL
     SELECT (CAST(s.last_updated_ts AS INT) / 3600) * 3600 as ts,
@@ -572,7 +591,12 @@ weather_history_raw AS (
     FROM states s
     LEFT JOIN state_attributes a ON s.attributes_id = a.attributes_id
     WHERE s.metadata_id = (SELECT cloud_id_states FROM ids)
-      AND ((SELECT sensor_clouds FROM vars) LIKE 'weather.%' OR NOT EXISTS (SELECT 1 FROM statistics WHERE metadata_id = (SELECT cloud_id_statistics FROM ids) AND (CAST(start_ts AS INT) / 3600) = (CAST(s.last_updated_ts AS INT) / 3600)))
+      AND ((SELECT sensor_clouds FROM vars) LIKE 'weather.%' OR NOT EXISTS (
+          SELECT 1 FROM statistics
+          WHERE metadata_id = (SELECT cloud_id_statistics FROM ids)
+            AND start_ts >= (CAST(s.last_updated_ts AS INT) / 3600) * 3600
+            AND start_ts < ((CAST(s.last_updated_ts AS INT) / 3600) * 3600) + 3600
+      ))
       AND s.last_updated_ts > strftime('%s', 'now', '-10 days')
       AND s.state NOT IN ('unknown', 'unavailable', '')
 
@@ -583,47 +607,72 @@ weather_history_raw AS (
     FROM states s
     LEFT JOIN state_attributes a ON s.attributes_id = a.attributes_id
     WHERE s.metadata_id = (SELECT w_entity_id FROM ids)
-      AND ((SELECT sensor_clouds FROM vars) LIKE 'weather.%' OR NOT EXISTS (SELECT 1 FROM statistics WHERE metadata_id = (SELECT cloud_id_statistics FROM ids) AND date(start_ts, 'unixepoch', (SELECT offset FROM vars)) = date(s.last_updated_ts, 'unixepoch', (SELECT offset FROM vars))))
+      AND ((SELECT sensor_clouds FROM vars) LIKE 'weather.%' OR NOT EXISTS (
+          SELECT 1 FROM statistics
+          WHERE metadata_id = (SELECT cloud_id_statistics FROM ids)
+            AND start_ts >= CAST(strftime('%s', date(s.last_updated_ts, 'unixepoch', (SELECT offset FROM vars))) AS INTEGER) - (SELECT offset_seconds FROM vars)
+            AND start_ts < CAST(strftime('%s', date(s.last_updated_ts, 'unixepoch', (SELECT offset FROM vars))) AS INTEGER) - (SELECT offset_seconds FROM vars) + 86400
+      ))
       AND s.last_updated_ts > strftime('%s', 'now', '-10 days')
       AND json_extract(a.shared_attrs, '$.cloud_coverage') IS NOT NULL
-      AND NOT EXISTS (SELECT 1 FROM statistics WHERE metadata_id = (SELECT cloud_id_statistics FROM ids)  AND date(start_ts, 'unixepoch', (SELECT offset FROM vars)) = date(s.last_updated_ts, 'unixepoch', (SELECT offset FROM vars)))
+      AND NOT EXISTS (
+          SELECT 1 FROM statistics
+          WHERE metadata_id = (SELECT cloud_id_statistics FROM ids)
+            AND start_ts >= CAST(strftime('%s', date(s.last_updated_ts, 'unixepoch', (SELECT offset FROM vars))) AS INTEGER) - (SELECT offset_seconds FROM vars)
+            AND start_ts < CAST(strftime('%s', date(s.last_updated_ts, 'unixepoch', (SELECT offset FROM vars))) AS INTEGER) - (SELECT offset_seconds FROM vars) + 86400
+      )
 
     UNION ALL
     SELECT (CAST(start_ts AS INT) / 3600) * 3600 as ts, NULL as cloud_val, CAST(COALESCE(mean, state) AS FLOAT) as uv_val, NULL as temp_val, NULL as precip_val
     FROM statistics
-    WHERE metadata_id = (SELECT uv_id_statistics FROM ids) AND date(start_ts, 'unixepoch', (SELECT offset FROM vars)) > date('now', (SELECT offset FROM vars), '-{history_days} days')
+    WHERE metadata_id = (SELECT uv_id_statistics FROM ids) AND start_ts >= (SELECT history_start_ts FROM clock)
 
     UNION ALL
     SELECT (CAST(s.last_updated_ts AS INT) / 3600) * 3600 as ts, NULL as cloud_val, CAST(s.state AS FLOAT) as uv_val, NULL as temp_val, NULL as precip_val
     FROM states s
     WHERE s.metadata_id = (SELECT uv_id_states FROM ids)
-      AND NOT EXISTS (SELECT 1 FROM statistics WHERE metadata_id = (SELECT uv_id_statistics FROM ids)  AND date(start_ts, 'unixepoch', (SELECT offset FROM vars)) = date(s.last_updated_ts, 'unixepoch', (SELECT offset FROM vars)))
+      AND NOT EXISTS (
+          SELECT 1 FROM statistics
+          WHERE metadata_id = (SELECT uv_id_statistics FROM ids)
+            AND start_ts >= CAST(strftime('%s', date(s.last_updated_ts, 'unixepoch', (SELECT offset FROM vars))) AS INTEGER) - (SELECT offset_seconds FROM vars)
+            AND start_ts < CAST(strftime('%s', date(s.last_updated_ts, 'unixepoch', (SELECT offset FROM vars))) AS INTEGER) - (SELECT offset_seconds FROM vars) + 86400
+      )
       AND s.last_updated_ts > strftime('%s', 'now', '-10 days')
       AND s.state NOT IN ('unknown', 'unavailable', '')
 
     UNION ALL
     SELECT (CAST(start_ts AS INT) / 3600) * 3600 as ts, NULL as cloud_val, NULL as uv_val, CAST(COALESCE(mean, state) AS FLOAT) as temp_val, NULL as precip_val
     FROM statistics
-    WHERE metadata_id = (SELECT temp_id_statistics FROM ids) AND date(start_ts, 'unixepoch', (SELECT offset FROM vars)) > date('now', (SELECT offset FROM vars), '-{history_days} days')
+    WHERE metadata_id = (SELECT temp_id_statistics FROM ids) AND start_ts >= (SELECT history_start_ts FROM clock)
 
     UNION ALL
     SELECT (CAST(s.last_updated_ts AS INT) / 3600) * 3600 as ts, NULL as cloud_val, NULL as uv_val, CAST(s.state AS FLOAT) as temp_val, NULL as precip_val
     FROM states s
     WHERE s.metadata_id = (SELECT temp_id_states FROM ids)
-      AND NOT EXISTS (SELECT 1 FROM statistics WHERE metadata_id = (SELECT temp_id_statistics FROM ids)  AND date(start_ts, 'unixepoch', (SELECT offset FROM vars)) = date(s.last_updated_ts, 'unixepoch', (SELECT offset FROM vars)))
+      AND NOT EXISTS (
+          SELECT 1 FROM statistics
+          WHERE metadata_id = (SELECT temp_id_statistics FROM ids)
+            AND start_ts >= CAST(strftime('%s', date(s.last_updated_ts, 'unixepoch', (SELECT offset FROM vars))) AS INTEGER) - (SELECT offset_seconds FROM vars)
+            AND start_ts < CAST(strftime('%s', date(s.last_updated_ts, 'unixepoch', (SELECT offset FROM vars))) AS INTEGER) - (SELECT offset_seconds FROM vars) + 86400
+      )
       AND s.last_updated_ts > strftime('%s', 'now', '-10 days')
       AND s.state NOT IN ('unknown', 'unavailable', '')
 
     UNION ALL
     SELECT (CAST(start_ts AS INT) / 3600) * 3600 as ts, NULL as cloud_val, NULL as uv_val, NULL as temp_val, CAST(COALESCE(mean, state) AS FLOAT) as precip_val
     FROM statistics
-    WHERE metadata_id = (SELECT precip_id_statistics FROM ids) AND date(start_ts, 'unixepoch', (SELECT offset FROM vars)) > date('now', (SELECT offset FROM vars), '-{history_days} days')
+    WHERE metadata_id = (SELECT precip_id_statistics FROM ids) AND start_ts >= (SELECT history_start_ts FROM clock)
 
     UNION ALL
     SELECT (CAST(s.last_updated_ts AS INT) / 3600) * 3600 as ts, NULL as cloud_val, NULL as uv_val, NULL as temp_val, CAST(s.state AS FLOAT) as precip_val
     FROM states s
     WHERE s.metadata_id = (SELECT precip_id_states FROM ids)
-      AND NOT EXISTS (SELECT 1 FROM statistics WHERE metadata_id = (SELECT precip_id_statistics FROM ids) AND date(start_ts, 'unixepoch', (SELECT offset FROM vars)) = date(s.last_updated_ts, 'unixepoch', (SELECT offset FROM vars)))
+      AND NOT EXISTS (
+          SELECT 1 FROM statistics
+          WHERE metadata_id = (SELECT precip_id_statistics FROM ids)
+            AND start_ts >= CAST(strftime('%s', date(s.last_updated_ts, 'unixepoch', (SELECT offset FROM vars))) AS INTEGER) - (SELECT offset_seconds FROM vars)
+            AND start_ts < CAST(strftime('%s', date(s.last_updated_ts, 'unixepoch', (SELECT offset FROM vars))) AS INTEGER) - (SELECT offset_seconds FROM vars) + 86400
+      )
       AND s.last_updated_ts > strftime('%s', 'now', '-10 days')
       AND s.state NOT IN ('unknown', 'unavailable', '')
 ),
@@ -663,7 +712,7 @@ pv_history_per_sensor AS (
         ) / (SELECT divisor FROM pv_stat_ids WHERE id = metadata_id) as single_yield_remaining
     FROM statistics
     WHERE metadata_id IN (SELECT id FROM pv_stat_ids)
-      AND date(start_ts, 'unixepoch', (SELECT offset FROM vars)) > date('now', (SELECT offset FROM vars), '-{history_days} days')
+      AND start_ts >= (SELECT history_start_ts FROM clock)
     GROUP BY 1, 2
 
     UNION ALL
@@ -689,7 +738,8 @@ pv_history_per_sensor AS (
     WHERE NOT EXISTS (
           SELECT 1 FROM statistics st
           WHERE st.metadata_id = f.metadata_id
-            AND date(st.start_ts, 'unixepoch', (SELECT offset FROM vars)) = f.day_string
+            AND st.start_ts >= CAST(strftime('%s', f.day_string) AS INTEGER) - (SELECT offset_seconds FROM vars)
+            AND st.start_ts < CAST(strftime('%s', f.day_string) AS INTEGER) - (SELECT offset_seconds FROM vars) + 86400
       )
     GROUP BY 1, 2, divisor
 ),

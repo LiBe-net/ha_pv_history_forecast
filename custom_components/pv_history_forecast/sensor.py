@@ -287,7 +287,9 @@ async def async_setup_entry(
     """Set up sensors for the config entry."""
     data = config_entry.data
     options = config_entry.options or {}
-    use_retune = _resolve_retune_enabled(options, data, default_if_missing=False)
+    use_retune = _resolve_retune_enabled(
+        options, data, default_if_missing=DEFAULT_RETUNE
+    )
 
     prefix = data.get(CONF_SENSOR_PREFIX, DEFAULT_SENSOR_PREFIX)
 
@@ -499,7 +501,9 @@ def _handle_options_update(
     )
     sensor._attr_device_class = sensor._device_class
     sensor._attr_state_class = sensor._state_class
-    sensor._use_retune = _resolve_retune_enabled(options, data, default_if_missing=False)
+    sensor._use_retune = _resolve_retune_enabled(
+        options, data, default_if_missing=DEFAULT_RETUNE
+    )
     sensor._retune_params, sensor._retune_base_params = _select_initial_params(
         use_retune=sensor._use_retune,
         sensor_clouds=sensor._sensor_clouds,
@@ -584,7 +588,9 @@ class SQLPVForecastSensor(SensorEntity, RestoreEntity):
         self._retune_task: asyncio.Task | None = None
         self._sql_query_template = sql_query
         self._sql_query = None
+        self._delta_sql_query = None
         self._engine = None
+        self._last_full_query_hour: datetime | None = None
         self._startup_retry_unsubs: list[Any] = []
         self._last_state_write_time: datetime | None = None
         self._update_in_progress: bool = False
@@ -825,6 +831,38 @@ FROM vars
                 """
                 self._sql_query = text(query_str)
 
+            pv_entities = self._sensor_pv if isinstance(self._sensor_pv, list) else [self._sensor_pv]
+            pv_sql_list = ", ".join(f"'{entity}'" for entity in pv_entities if entity)
+            self._delta_sql_query = text(
+                f"""
+WITH pv_stat_ids AS (
+    SELECT id,
+           (SELECT metadata_id FROM states_meta WHERE entity_id = statistic_id) AS states_metadata_id,
+           CASE WHEN unit_of_measurement = 'Wh' THEN 1000.0 ELSE 1.0 END AS divisor
+    FROM statistics_meta
+    WHERE statistic_id IN ({pv_sql_list or "''"})
+)
+SELECT COALESCE(SUM(
+    (CAST(s_now.state AS FLOAT) - CAST(s_hour.state AS FLOAT)) / pvi.divisor
+), 0.0)
+FROM pv_stat_ids pvi
+JOIN states s_now ON s_now.metadata_id = pvi.states_metadata_id
+  AND s_now.state_id = (
+      SELECT MAX(state_id) FROM states
+      WHERE metadata_id = pvi.states_metadata_id
+        AND state NOT IN ('unknown', 'unavailable', '')
+  )
+JOIN states s_hour ON s_hour.metadata_id = pvi.states_metadata_id
+  AND s_hour.state_id = (
+      SELECT state_id FROM states
+      WHERE metadata_id = pvi.states_metadata_id
+        AND last_updated_ts <= (strftime('%s', 'now') / 3600) * 3600
+        AND state NOT IN ('unknown', 'unavailable', '')
+      ORDER BY last_updated_ts DESC LIMIT 1
+  )
+"""
+            )
+
             _LOGGER.debug(
                 "SQL Query rebuilt with sensors: clouds=%s, pv=%s, forecast=%s, temp=%s, precip=%s",
                 self._sensor_clouds, self._sensor_pv, self._sensor_forecast, self._sensor_temp, self._sensor_precip
@@ -834,7 +872,11 @@ FROM vars
             self._available = False
 
     async def async_update(self) -> None:
-        """Update the sensor only if last update was more than 5 minutes ago."""
+        """Refresh every 5 minutes; run the expensive SQL at most once per clock hour.
+
+        Between hourly full-query runs, only the lightweight live PV delta query
+        is executed and merged into the cached full result.
+        """
         now = datetime.now()
         if self._update_in_progress:
             return
@@ -849,7 +891,35 @@ FROM vars
             if self._engine is None:
                 await self.hass.async_add_executor_job(self._init_database)
 
-            result = await self.hass.async_add_executor_job(self._execute_query)
+            # Historical/LTS inputs have hourly resolution. Use the local clock-hour
+            # bucket as the full-query cache key so the expensive query runs once
+            # in each hour; five-minute refreshes inside that hour use only delta SQL.
+            current_hour = now.replace(minute=0, second=0, microsecond=0)
+            run_full_query = (
+                self._last_full_query_hour != current_hour
+                or self._last_raw_result is None
+            )
+            if run_full_query:
+                result = await self.hass.async_add_executor_job(self._execute_query)
+                if result is not None:
+                    self._last_full_query_hour = current_hour
+            else:
+                live_delta = await self.hass.async_add_executor_job(self._execute_delta_query)
+                if live_delta is None:
+                    result = self._last_raw_result
+                else:
+                    try:
+                        cached = json.loads(self._last_raw_result)
+                        if not isinstance(cached, dict):
+                            raise TypeError("cached SQL result is not an object")
+                        cached["live_hour_delta"] = live_delta
+                        result = json.dumps(cached)
+                    except (TypeError, ValueError):
+                        # Custom/legacy SQL can return another JSON shape. Preserve
+                        # its established behavior by falling back to the full query.
+                        result = await self.hass.async_add_executor_job(self._execute_query)
+                        if result is not None:
+                            self._last_full_query_hour = current_hour
 
             if result is not None:
                 options = self.config_entry.options or {}
@@ -1012,6 +1082,17 @@ FROM vars
             if row and row[0] is not None:
                 return str(row[0])
         return None
+
+    def _execute_delta_query(self) -> float | None:
+        """Read only the live PV counter delta used between hourly full queries."""
+        if self._delta_sql_query is None:
+            return None
+        with self._engine.connect() as conn:
+            row = conn.execute(self._delta_sql_query).fetchone()
+            if row and row[0] is not None:
+                return float(row[0])
+        return None
+
     def _apply_template(self, raw_value: str) -> float | str | None:
         """Apply value template to the raw SQL result string."""
         try:
@@ -1415,6 +1496,7 @@ FROM vars
 
         if force_refresh:
             self._last_update_time = None
+            self._last_full_query_hour = None
             await self.async_update()
 
         options = self.config_entry.options or {}
