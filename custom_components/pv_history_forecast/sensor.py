@@ -173,6 +173,7 @@ def _apply_adaptive_ema_smoothing(
     day_reset: bool = False,
     step_count: int = 0,
     up_hold_cycles: int = 3,
+    prevent_increase: bool = False,
 ) -> tuple[float | str | None, int]:
     """Apply adaptive EMA smoothing with smooth S-curve convergence.
 
@@ -182,7 +183,9 @@ def _apply_adaptive_ema_smoothing(
 
     Day reset and missing old values are adopted directly. Falling values start
     moving immediately and accelerate while the trend persists. Rising values
-    are intentionally very slow, especially after a falling trend.
+    are intentionally very slow, especially after a falling trend. If
+    ``prevent_increase`` is set, a rising target is held at the current value
+    until the target falls below it again.
     """
     if new_val is None:
         return old_val, step_count
@@ -193,7 +196,7 @@ def _apply_adaptive_ema_smoothing(
         except (ValueError, TypeError):
             return new_val, 0
 
-    if old_val is None or old_val == 0 or old_val == 0.0:
+    if old_val is None or ((old_val == 0 or old_val == 0.0) and not prevent_increase):
         try:
             return round(float(new_val), 3), 0
         except (ValueError, TypeError):
@@ -206,6 +209,14 @@ def _apply_adaptive_ema_smoothing(
         return new_val, 0
 
     raw_gap = new_f - old_f
+
+    # A remaining-today forecast represents energy that can still be produced
+    # during the shrinking remainder of the day. For the main and minimum
+    # forecasts, never let a later forecast revision increase that value. Keep
+    # the current state until the raw forecast has caught up and drops below it.
+    if prevent_increase and raw_gap >= 0.0:
+        return round(old_f, 3), 0
+
     ref_val = max(abs(old_f), pv_max * 0.05, 1.0)
     gap_ratio = abs(raw_gap) / ref_val
     is_down = raw_gap < 0.0
@@ -382,6 +393,7 @@ async def async_setup_entry(
         name=f"{prefix}_remaining_today_min",
         value_template=DEFAULT_VALUE_TEMPLATE_MIN,
         throttle_minutes=5,
+        prevent_ema_increase=True,
     )
     max_sensor = PVForecastTemplateSensor(
         hass=hass,
@@ -996,6 +1008,7 @@ JOIN states s_hour ON s_hour.metadata_id = pvi.states_metadata_id
                         new_val, self._attr_native_value, pv_max,
                         day_reset=is_day_reset,
                         step_count=self._last_ema_step,
+                        prevent_increase=True,
                     )
                     if new_val is not None:
                         self._attr_native_value = smoothed
@@ -1882,6 +1895,7 @@ class PVForecastTemplateSensor(SensorEntity, RestoreEntity):
         value_template: str,
         throttle_minutes: int = 0,
         no_ema: bool = False,
+        prevent_ema_increase: bool = False,
     ) -> None:
         """Initialize the derived sensor."""
         self.hass = hass
@@ -1906,6 +1920,7 @@ class PVForecastTemplateSensor(SensorEntity, RestoreEntity):
         self._last_processed_main_json_stamp: str | None = None
         # When True, EMA smoothing is completely skipped – sensor uses raw template value.
         self._no_ema: bool = no_ema
+        self._prevent_ema_increase: bool = prevent_ema_increase
         self.entity_id = generate_entity_id("sensor.{}", name, hass=hass)
 
     async def async_added_to_hass(self) -> None:
@@ -2015,6 +2030,7 @@ class PVForecastTemplateSensor(SensorEntity, RestoreEntity):
                 new_val, self._attr_native_value, pv_max,
                 day_reset=False, # Immer False, da True oben abgefangen wurde
                 step_count=self._last_ema_step,
+                prevent_increase=self._prevent_ema_increase,
             )
             if new_val is not None:
                 self._attr_native_value = smoothed
