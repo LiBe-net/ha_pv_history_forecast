@@ -60,6 +60,7 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import WeatherCoordinator
+from .forecast_fields import resolve_forecast_field_value
 
 CONF_RETUNE = _const.CONF_RETUNE
 DEFAULT_RETUNE = bool(_const.DEFAULT_RETUNE)
@@ -2296,9 +2297,13 @@ class CloudCoverageSensor(SensorEntity):
         """
         # 1. Coordinator forecast (most reliable — already fetched before entity setup)
         if self._coordinator and self._coordinator.data:
-            cloud_coverage = _nearest_forecast_field(
-                self._coordinator.data.get("forecast", []), "cloud_coverage"
-            )
+            forecast_list = self._coordinator.data.get("forecast", [])
+            cloud_coverage = _nearest_forecast_field(forecast_list, "cloud_coverage")
+            if cloud_coverage is None:
+                for entry in forecast_list:
+                    cloud_coverage = resolve_forecast_field_value(entry, "cloud_coverage")
+                    if cloud_coverage is not None:
+                        break
             if cloud_coverage is not None:
                 try:
                     self._attr_native_value = float(cloud_coverage)
@@ -2399,6 +2404,8 @@ class UVIndexSensor(SensorEntity):
             state = self.hass.states.get(self._weather_entity)
             if state is not None and state.state not in ("unknown", "unavailable", ""):
                 raw = state.attributes.get("uv_index")
+                if raw is None:
+                    raw = state.attributes.get("uv")
                 if raw is not None:
                     try:
                         uv_index = float(raw)
@@ -2483,6 +2490,8 @@ class TemperatureSensor(SensorEntity):
             state = self.hass.states.get(self._weather_entity)
             if state is not None and state.state not in ("unknown", "unavailable", ""):
                 raw = state.attributes.get("temperature")
+                if raw is None:
+                    raw = state.attributes.get("temp")
                 if raw is not None:
                     try:
                         temp = float(raw)
@@ -2538,13 +2547,25 @@ class PrecipitationSensor(SensorEntity):
 
         # 1. Coordinator forecast
         if self._coordinator and self._coordinator.data:
-            precip = _nearest_forecast_field(self._coordinator.data.get("forecast", []), "precipitation")
+            forecast_list = self._coordinator.data.get("forecast", [])
+            precip = _nearest_forecast_field(forecast_list, "precipitation")
+            if precip is None:
+                for entry in forecast_list:
+                    precip = resolve_forecast_field_value(entry, "precipitation")
+                    if precip is not None:
+                        break
 
         # 2. Direct weather entity state attribute
         if precip is None:
             state = self.hass.states.get(self._weather_entity)
             if state is not None and state.state not in ("unknown", "unavailable", ""):
                 raw = state.attributes.get("precipitation")
+                if raw is None:
+                    raw = state.attributes.get("precipitation_probability")
+                if raw is None:
+                    raw = state.attributes.get("precipitation_rate")
+                if raw is None:
+                    raw = state.attributes.get("rain")
                 if raw is not None:
                     try:
                         precip = float(raw)
@@ -2556,17 +2577,18 @@ class PrecipitationSensor(SensorEntity):
             precip = _nearest_forecast_value(self.hass, self._forecast_sensor_entity_id, "precipitation")
 
         if precip is not None:
-            # 1. Unter 0.05 mm/h -> 0%
-            if precip <= 0.05:
-                pct_val = 0.0
-            # 2. Über 1.05 mm/h -> 100% (Gedeckelt)
-            elif precip >= 1.05:
-                pct_val = 100.0
-            # 3. Lineare Rampe dazwischen skaliert auf 0% - 100%
+            if precip > 0.0 and precip <= 100.0:
+                # Providers like met.no may expose precipitation_probability directly as a percentage.
+                pct_val = precip
             else:
-                pct_val = (precip - 0.05) * 100.0
+                # Legacy fallback: interpret precipitation as mm/h and scale to a percentage.
+                if precip <= 0.05:
+                    pct_val = 0.0
+                elif precip >= 1.05:
+                    pct_val = 100.0
+                else:
+                    pct_val = (precip - 0.05) * 100.0
 
-            # Als gerundeten Integer speichern (z.B. 45 statt 45.23)
             self._attr_native_value = int(round(pct_val))
             self._attr_available = True
         else:

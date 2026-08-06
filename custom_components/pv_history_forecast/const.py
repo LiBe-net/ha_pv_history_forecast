@@ -168,8 +168,19 @@ PREP_AND_POOL_BUILDING = """{% set raw = value if value is defined and value is 
       {% for item in pool %}{% set ns_init_def.w = ns_init_def.w + item.w %}{% set ns_init_def.wy = ns_init_def.wy + (item.yield * item.w) %}{% endfor %}
       {% set base_historical_yield = (ns_init_def.wy / ns_init_def.w if ns_init_def.w > 0 else 0.0) %}
 
+      {# WEATHER-ONLY FALLBACK WHEN NO HISTORICAL POOL EXISTS.
+         This keeps the sensor responsive for new installs or providers like met.no
+         even before enough historical comparison days are available. #}
+      {% set weather_fallback_yield = namespace(val=0.0) %}
+      {% if pool | count == 0 %}
+        {% set weather_fallback_yield.val = ([1.0 - (f_avg / 100.0), 0.0] | max) * 3.0 + ([f_uv_avg / 10.0, 0.0] | max) + ([f_temp_avg - 15.0, 0.0] | max) * 0.08 %}
+        {% if pv_max_record > 0 and weather_fallback_yield.val > pv_max_record %}
+          {% set weather_fallback_yield.val = pv_max_record %}
+        {% endif %}
+      {% endif %}
+
       {# GLOBAL FINAL CORRECTION FOR THE EXPECTED SENSOR VALUE (DEFAULT) #}
-      {% set global_base_yield = base_historical_yield * global_loo_factor.val * global_trend_factor.val %}
+      {% set global_base_yield = (base_historical_yield if pool | count > 0 else weather_fallback_yield.val) * global_loo_factor.val * global_trend_factor.val %}
 
       {# PROVIDE GLOBAL POOL METRICS FOR MIN / MAX #}
       {% set ns_global_mean = namespace(sum=0.0, count=0) %}
@@ -752,6 +763,55 @@ pv_daily_totals AS (
     FROM pv_history_per_sensor
     GROUP BY 1
 ),
+weather_entity_state_fallback AS (
+    SELECT
+        CAST(json_extract(a.shared_attrs, '$.cloud_coverage') AS FLOAT) as cloud_val,
+        COALESCE(
+            CAST(json_extract(a.shared_attrs, '$.uv_index') AS FLOAT),
+            CAST(json_extract(a.shared_attrs, '$.uv') AS FLOAT),
+            CAST(json_extract(a.shared_attrs, '$.uv_index_value') AS FLOAT)
+        ) as uv_val,
+        COALESCE(
+            CAST(json_extract(a.shared_attrs, '$.temperature') AS FLOAT),
+            CAST(json_extract(a.shared_attrs, '$.temp') AS FLOAT),
+            CAST(json_extract(a.shared_attrs, '$.temperature_value') AS FLOAT)
+        ) as temp_val,
+        CASE
+            WHEN CAST(json_extract(a.shared_attrs, '$.precipitation_probability') AS FLOAT) IS NOT NULL THEN CAST(json_extract(a.shared_attrs, '$.precipitation_probability') AS FLOAT)
+            ELSE
+                CASE
+                    WHEN COALESCE(
+                        CAST(json_extract(a.shared_attrs, '$.precipitation') AS FLOAT),
+                        CAST(json_extract(a.shared_attrs, '$.precipitation_rate') AS FLOAT),
+                        CAST(json_extract(a.shared_attrs, '$.rain') AS FLOAT)
+                    ) IS NULL THEN 0.0
+                    WHEN COALESCE(
+                        CAST(json_extract(a.shared_attrs, '$.precipitation') AS FLOAT),
+                        CAST(json_extract(a.shared_attrs, '$.precipitation_rate') AS FLOAT),
+                        CAST(json_extract(a.shared_attrs, '$.rain') AS FLOAT)
+                    ) <= 0.05 THEN 0.0
+                    WHEN COALESCE(
+                        CAST(json_extract(a.shared_attrs, '$.precipitation') AS FLOAT),
+                        CAST(json_extract(a.shared_attrs, '$.precipitation_rate') AS FLOAT),
+                        CAST(json_extract(a.shared_attrs, '$.rain') AS FLOAT)
+                    ) >= 1.05 THEN 100.0
+                    ELSE (
+                        COALESCE(
+                            CAST(json_extract(a.shared_attrs, '$.precipitation') AS FLOAT),
+                            CAST(json_extract(a.shared_attrs, '$.precipitation_rate') AS FLOAT),
+                            CAST(json_extract(a.shared_attrs, '$.rain') AS FLOAT)
+                        ) - 0.05) * 100.0
+                    END
+            END as precip_val
+    FROM states s
+    JOIN state_attributes a ON s.attributes_id = a.attributes_id
+    WHERE s.metadata_id = (SELECT w_entity_id FROM ids)
+      AND s.last_updated_ts = (
+          SELECT MAX(sw.last_updated_ts)
+          FROM states sw
+          WHERE sw.metadata_id = (SELECT w_entity_id FROM ids)
+      )
+),
 forecast AS (
     SELECT
         -- Today's remaining values (now uses local sun times!)
@@ -759,50 +819,130 @@ forecast AS (
             WHEN substr(json_extract(f.value, '$.datetime'), 1, 10) = date('now', (SELECT offset FROM vars))
              AND substr(json_extract(f.value, '$.datetime'), 12, 5) >= MAX(strftime('%H:00', 'now', (SELECT offset FROM vars)), (SELECT sun_start_local FROM pv_activity))
              AND substr(json_extract(f.value, '$.datetime'), 12, 5) <= (SELECT sun_end_local FROM pv_activity)
-            THEN CAST(json_extract(f.value, '$.cloud_coverage') AS FLOAT) END), 0.0), 1) as cloud_remaining,
+            THEN COALESCE(
+                CAST(json_extract(f.value, '$.cloud_coverage') AS FLOAT),
+                CAST(json_extract(f.value, '$.cloud_cover') AS FLOAT),
+                CAST(json_extract(f.value, '$.cloud_cover_percentage') AS FLOAT),
+                CAST(json_extract(f.value, '$.clouds') AS FLOAT),
+                CAST(json_extract(f.value, '$.cloud') AS FLOAT)
+            ) END), (SELECT cloud_val FROM weather_entity_state_fallback)), 1) as cloud_remaining,
 
         ROUND(COALESCE(AVG(CASE
             WHEN substr(json_extract(f.value, '$.datetime'), 1, 10) = date('now', (SELECT offset FROM vars))
              AND substr(json_extract(f.value, '$.datetime'), 12, 5) >= MAX(strftime('%H:00', 'now', (SELECT offset FROM vars)), (SELECT sun_start_local FROM pv_activity))
              AND substr(json_extract(f.value, '$.datetime'), 12, 5) <= (SELECT sun_end_local FROM pv_activity)
-            THEN CAST(json_extract(f.value, '$.uv_index') AS FLOAT) END), 0.0), 1) as uv_remaining,
+            THEN COALESCE(
+                CAST(json_extract(f.value, '$.uv_index') AS FLOAT),
+                CAST(json_extract(f.value, '$.uv') AS FLOAT),
+                CAST(json_extract(f.value, '$.uv_index_value') AS FLOAT)
+            ) END), (SELECT uv_val FROM weather_entity_state_fallback)), 1) as uv_remaining,
 
         ROUND(COALESCE(AVG(CASE
             WHEN substr(json_extract(f.value, '$.datetime'), 1, 10) = date('now', (SELECT offset FROM vars))
              AND substr(json_extract(f.value, '$.datetime'), 12, 5) >= MAX(strftime('%H:00', 'now', (SELECT offset FROM vars)), (SELECT sun_start_local FROM pv_activity))
              AND substr(json_extract(f.value, '$.datetime'), 12, 5) <= (SELECT sun_end_local FROM pv_activity)
-            THEN CAST(json_extract(f.value, '$.temperature') AS FLOAT) END), 0.0), 1) as temp_remaining,
+            THEN COALESCE(
+                CAST(json_extract(f.value, '$.temperature') AS FLOAT),
+                CAST(json_extract(f.value, '$.temp') AS FLOAT),
+                CAST(json_extract(f.value, '$.temperature_value') AS FLOAT)
+            ) END), (SELECT temp_val FROM weather_entity_state_fallback)), 1) as temp_remaining,
 
         ROUND(COALESCE(AVG(CASE
             WHEN substr(json_extract(f.value, '$.datetime'), 1, 10) = date('now', (SELECT offset FROM vars))
              AND substr(json_extract(f.value, '$.datetime'), 12, 5) >= MAX(strftime('%H:00', 'now', (SELECT offset FROM vars)), (SELECT sun_start_local FROM pv_activity))
              AND substr(json_extract(f.value, '$.datetime'), 12, 5) <= (SELECT sun_end_local FROM pv_activity)
-            THEN CASE WHEN CAST(json_extract(f.value, '$.precipitation') AS FLOAT) <= 0.05 THEN 0.0 WHEN CAST(json_extract(f.value, '$.precipitation') AS FLOAT) >= 1.05 THEN 100.0 ELSE (CAST(json_extract(f.value, '$.precipitation') AS FLOAT) - 0.05) * 100.0 END END), 0.0), 1) as precip_remaining,
+            THEN CASE
+                WHEN CAST(json_extract(f.value, '$.precipitation_probability') AS FLOAT) IS NOT NULL THEN CAST(json_extract(f.value, '$.precipitation_probability') AS FLOAT)
+                ELSE
+                    CASE
+                        WHEN COALESCE(
+                            CAST(json_extract(f.value, '$.precipitation') AS FLOAT),
+                            CAST(json_extract(f.value, '$.precipitation_rate') AS FLOAT),
+                            CAST(json_extract(f.value, '$.rain') AS FLOAT)
+                        ) IS NULL THEN 0.0
+                        WHEN COALESCE(
+                            CAST(json_extract(f.value, '$.precipitation') AS FLOAT),
+                            CAST(json_extract(f.value, '$.precipitation_rate') AS FLOAT),
+                            CAST(json_extract(f.value, '$.rain') AS FLOAT)
+                        ) <= 0.05 THEN 0.0
+                        WHEN COALESCE(
+                            CAST(json_extract(f.value, '$.precipitation') AS FLOAT),
+                            CAST(json_extract(f.value, '$.precipitation_rate') AS FLOAT),
+                            CAST(json_extract(f.value, '$.rain') AS FLOAT)
+                        ) >= 1.05 THEN 100.0
+                        ELSE (
+                            COALESCE(
+                                CAST(json_extract(f.value, '$.precipitation') AS FLOAT),
+                                CAST(json_extract(f.value, '$.precipitation_rate') AS FLOAT),
+                                CAST(json_extract(f.value, '$.rain') AS FLOAT)
+                            ) - 0.05) * 100.0
+                        END
+                END END), (SELECT precip_val FROM weather_entity_state_fallback)), 1) as precip_remaining,
 
         -- Values for the following day (now also uses local sun times!)
         ROUND(COALESCE(AVG(CASE
             WHEN substr(json_extract(f.value, '$.datetime'), 1, 10) = date('now', (SELECT offset FROM vars), '+1 day')
              AND substr(json_extract(f.value, '$.datetime'), 12, 5) >= (SELECT sun_start_local FROM pv_activity)
              AND substr(json_extract(f.value, '$.datetime'), 12, 5) <= (SELECT sun_end_local FROM pv_activity)
-            THEN CAST(json_extract(f.value, '$.cloud_coverage') AS FLOAT) END), 0.0), 1) as next_cloud_total,
+            THEN COALESCE(
+                CAST(json_extract(f.value, '$.cloud_coverage') AS FLOAT),
+                CAST(json_extract(f.value, '$.cloud_cover') AS FLOAT),
+                CAST(json_extract(f.value, '$.cloud_cover_percentage') AS FLOAT),
+                CAST(json_extract(f.value, '$.clouds') AS FLOAT),
+                CAST(json_extract(f.value, '$.cloud') AS FLOAT)
+            ) END), (SELECT cloud_val FROM weather_entity_state_fallback)), 1) as next_cloud_total,
 
         ROUND(COALESCE(AVG(CASE
             WHEN substr(json_extract(f.value, '$.datetime'), 1, 10) = date('now', (SELECT offset FROM vars), '+1 day')
              AND substr(json_extract(f.value, '$.datetime'), 12, 5) >= (SELECT sun_start_local FROM pv_activity)
              AND substr(json_extract(f.value, '$.datetime'), 12, 5) <= (SELECT sun_end_local FROM pv_activity)
-            THEN CAST(json_extract(f.value, '$.uv_index') AS FLOAT) END), 0.0), 1) as next_uv_total,
+            THEN COALESCE(
+                CAST(json_extract(f.value, '$.uv_index') AS FLOAT),
+                CAST(json_extract(f.value, '$.uv') AS FLOAT),
+                CAST(json_extract(f.value, '$.uv_index_value') AS FLOAT)
+            ) END), (SELECT uv_val FROM weather_entity_state_fallback)), 1) as next_uv_total,
 
         ROUND(COALESCE(AVG(CASE
             WHEN substr(json_extract(f.value, '$.datetime'), 1, 10) = date('now', (SELECT offset FROM vars), '+1 day')
              AND substr(json_extract(f.value, '$.datetime'), 12, 5) >= (SELECT sun_start_local FROM pv_activity)
              AND substr(json_extract(f.value, '$.datetime'), 12, 5) <= (SELECT sun_end_local FROM pv_activity)
-            THEN CAST(json_extract(f.value, '$.temperature') AS FLOAT) END), 0.0), 1) as next_temp_total,
+            THEN COALESCE(
+                CAST(json_extract(f.value, '$.temperature') AS FLOAT),
+                CAST(json_extract(f.value, '$.temp') AS FLOAT),
+                CAST(json_extract(f.value, '$.temperature_value') AS FLOAT)
+            ) END), (SELECT temp_val FROM weather_entity_state_fallback)), 1) as next_temp_total,
 
         ROUND(COALESCE(AVG(CASE
             WHEN substr(json_extract(f.value, '$.datetime'), 1, 10) = date('now', (SELECT offset FROM vars), '+1 day')
              AND substr(json_extract(f.value, '$.datetime'), 12, 5) >= (SELECT sun_start_local FROM pv_activity)
              AND substr(json_extract(f.value, '$.datetime'), 12, 5) <= (SELECT sun_end_local FROM pv_activity)
-            THEN CASE WHEN CAST(json_extract(f.value, '$.precipitation') AS FLOAT) <= 0.05 THEN 0.0 WHEN CAST(json_extract(f.value, '$.precipitation') AS FLOAT) >= 1.05 THEN 100.0 ELSE (CAST(json_extract(f.value, '$.precipitation') AS FLOAT) - 0.05) * 100.0 END END), 0.0), 1) as next_precip_total
+            THEN CASE
+                WHEN CAST(json_extract(f.value, '$.precipitation_probability') AS FLOAT) IS NOT NULL THEN CAST(json_extract(f.value, '$.precipitation_probability') AS FLOAT)
+                ELSE
+                    CASE
+                        WHEN COALESCE(
+                            CAST(json_extract(f.value, '$.precipitation') AS FLOAT),
+                            CAST(json_extract(f.value, '$.precipitation_rate') AS FLOAT),
+                            CAST(json_extract(f.value, '$.rain') AS FLOAT)
+                        ) IS NULL THEN 0.0
+                        WHEN COALESCE(
+                            CAST(json_extract(f.value, '$.precipitation') AS FLOAT),
+                            CAST(json_extract(f.value, '$.precipitation_rate') AS FLOAT),
+                            CAST(json_extract(f.value, '$.rain') AS FLOAT)
+                        ) <= 0.05 THEN 0.0
+                        WHEN COALESCE(
+                            CAST(json_extract(f.value, '$.precipitation') AS FLOAT),
+                            CAST(json_extract(f.value, '$.precipitation_rate') AS FLOAT),
+                            CAST(json_extract(f.value, '$.rain') AS FLOAT)
+                        ) >= 1.05 THEN 100.0
+                        ELSE (
+                            COALESCE(
+                                CAST(json_extract(f.value, '$.precipitation') AS FLOAT),
+                                CAST(json_extract(f.value, '$.precipitation_rate') AS FLOAT),
+                                CAST(json_extract(f.value, '$.rain') AS FLOAT)
+                            ) - 0.05) * 100.0
+                        END
+                END END), (SELECT precip_val FROM weather_entity_state_fallback)), 1) as next_precip_total
     FROM states s
     JOIN state_attributes a ON s.attributes_id = a.attributes_id
     CROSS JOIN json_each(a.shared_attrs, '$.forecast') f
